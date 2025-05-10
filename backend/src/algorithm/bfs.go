@@ -1,0 +1,157 @@
+package algorithm
+
+import (
+	"backend/src/model"
+	"backend/src/utility"
+	"container/list"
+	"fmt"
+)
+
+type BFSResult struct {
+	TargetElement string           `json:"target_element"`
+	Paths         [][]model.Recipe `json:"recipes"`
+	VisitedNodes  int              `json:"visited_nodes"`
+}
+
+type BFSNode struct {
+	Element    string `json:"element"`
+	Path       []model.Recipe
+	ParentNode *BFSNode
+}
+
+type SearchProgress struct {
+	CurrentElement string          `json:"currentElement"`
+	Visited        int             `json:"visited"`
+	PathsFound     int             `json:"pathsFound"`
+	VisitedNodes   map[string]bool `json:"visitedNodes"`
+}
+
+func BFS(db *model.ElementsDatabase, startElements []string, targetElement string, maxPath int, result chan<- *BFSResult, step chan<- *SearchProgress) {
+
+	target, exists := db.Elements[targetElement]
+	if !exists {
+		result <- &BFSResult{
+			TargetElement: targetElement,
+			Paths:         [][]model.Recipe{},
+			VisitedNodes:  0,
+		}
+		close(result)
+		return
+	}
+	if target.IsBasic {
+		result <- &BFSResult{
+			TargetElement: targetElement,
+			Paths:         [][]model.Recipe{},
+			VisitedNodes:  1,
+		}
+		close(result)
+		return
+	}
+
+	visited := make(map[string]bool)
+
+	queue := list.New()
+
+	for _, basic := range startElements {
+		node := &BFSNode{
+			Element:    basic,
+			Path:       []model.Recipe{},
+			ParentNode: nil,
+		}
+		queue.PushBack(node)
+		visited[basic] = true
+
+	}
+
+	paths := [][]model.Recipe{}
+	visitedCount := 0
+
+	for queue.Len() > 0 && (maxPath <= 0 || len(paths) < maxPath) {
+
+		visitedCount++
+		node := queue.Remove(queue.Front()).(*BFSNode)
+		if step != nil {
+			step <- &SearchProgress{
+				CurrentElement: node.Element,
+				Visited:        visitedCount,
+				PathsFound:     len(paths),
+				VisitedNodes:   visited,
+			}
+		}
+
+		// Check if we found the target
+		if node.Element == targetElement {
+			paths = append(paths, node.Path)
+
+			// If we've found enough paths, exit
+			if maxPath > 0 && len(paths) >= maxPath {
+				break
+			}
+
+			// Continue searching for more paths
+			continue
+		}
+
+		// Get all possible combinations from this element and others
+		for otherElementID := range db.Elements {
+			// Skip if we've already visited this combination
+			combinationKey := fmt.Sprintf("%s+%s", node.Element, otherElementID)
+			if visited[combinationKey] {
+				continue
+			}
+			visited[combinationKey] = true
+
+			// Check all elements for recipes using this combination
+			for resultElementID, resultElement := range db.Elements {
+				resultTier := utility.ParseTier(resultElement.Tier)
+				for _, recipe := range resultElement.Recipes {
+					if (recipe.Element1 == node.Element && recipe.Element2 == otherElementID) ||
+						(recipe.Element1 == otherElementID && recipe.Element2 == node.Element) {
+
+						r1, ok1 := db.Elements[recipe.Element1]
+						r2, ok2 := db.Elements[recipe.Element2]
+						if !ok1 || !ok2 {
+							continue
+						}
+						t1 := utility.ParseTier(r1.Tier)
+						t2 := utility.ParseTier(r2.Tier)
+
+						if t1 >= resultTier || t2 >= resultTier {
+							continue // Tidak boleh menggunakan elemen dari tier yang sama atau lebih tinggi
+						}
+						// Found a valid combination
+						newPath := make([]model.Recipe, len(node.Path)+1)
+						copy(newPath, node.Path)
+						newPath[len(node.Path)] = recipe
+
+						newNode := &BFSNode{
+							Element:    resultElementID,
+							Path:       newPath,
+							ParentNode: node,
+						}
+						queue.PushBack(newNode)
+					}
+				}
+			}
+		}
+	}
+
+	result <- &BFSResult{
+		TargetElement: targetElement,
+		Paths:         paths,
+		VisitedNodes:  visitedCount,
+	}
+	close(result)
+}
+func MultiBFS(db *model.ElementsDatabase, targetElement string, maxPaths int, step chan<- *SearchProgress) *BFSResult {
+	sortedDb := utility.SortByTier(db)
+	result := make(chan *BFSResult, 1)
+	startElement := []string{"Air", "Water", "Fire", "Earth"}
+	// Run BFS in a goroutine
+	go BFS(sortedDb, startElement, targetElement, maxPaths, result, step)
+
+	// Wait for result
+	results := <-result
+
+	return results
+}
