@@ -45,6 +45,12 @@ type ScrapeElement struct {
 	Tier   string      `json:"tier"`
 }
 
+type TreeNode struct {
+	Name     string      `json:"name"`
+	Recipe   *Recipe     `json:"recipe,omitempty"` // step untuk membentuk node ini
+	Children []*TreeNode `json:"children,omitempty"`
+}
+
 func ConvertToElement(id string, scraped ScrapeElement) Element {
 	recipes := make([]Recipe, 0, len(scraped.Combos))
 	for _, combo := range scraped.Combos {
