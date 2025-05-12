@@ -1,4 +1,3 @@
-
 package algorithm
 
 import (
@@ -49,7 +48,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	}
 
 	visitedCombinations := make(map[string]bool)
-	discoveredElements := make(map[string]bool) // Semua elemen yang sudah ditemukan dari hasil kombinasi
+	discoveredElements := make(map[string]bool)
 	queue := list.New()
 
 	// Masukkan elemen dasar ke queue dan discovered
@@ -66,7 +65,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	paths := [][]model.Recipe{}
 	visitedCount := 0
 
-	for queue.Len() > 0 && (maxPath <= 0 || len(paths) < maxPath) {
+	for queue.Len() > 0 {
 		visitedCount++
 		node := queue.Remove(queue.Front()).(*BFSNode)
 
@@ -81,10 +80,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 
 		if node.Element == targetElement {
 			paths = append(paths, node.Path)
-			if maxPath > 0 && len(paths) >= maxPath {
-				break
-			}
-			continue
+			break
 		}
 
 		// Kombinasikan node ini dengan semua elemen yang sudah ditemukan sebelumnya
@@ -136,13 +132,80 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 			}
 		}
 	}
-
+	for i := range paths {
+		paths[i] = expandPath(paths[i], db, startElements)
+	}
 	result <- &BFSResult{
 		TargetElement: targetElement,
 		Paths:         paths,
 		VisitedNodes:  visitedCount,
 	}
 	close(result)
+}
+func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
+	isBasic := make(map[string]bool)
+	elementRecipes := make(map[string]model.Recipe)
+
+	// Mark basic elements
+	for _, elem := range startElements {
+		isBasic[elem] = true
+	}
+
+	// Build a complete recipe map with all dependencies
+	var buildDependencies func(elementID string) []model.Recipe
+	buildDependencies = func(elementID string) []model.Recipe {
+		// If basic element or already processed, return empty
+		if isBasic[elementID] {
+			return []model.Recipe{}
+		}
+
+		// If we already have a recipe for this element, don't process again
+		if _, exists := elementRecipes[elementID]; exists {
+			return []model.Recipe{}
+		}
+
+		// Find recipe for this element
+		element, exists := db.Elements[elementID]
+		if !exists || len(element.Recipes) == 0 {
+			return []model.Recipe{}
+		}
+
+		recipe := element.Recipes[0] // Take first recipe
+
+		// Get dependencies for both ingredients
+		deps := []model.Recipe{}
+		deps = append(deps, buildDependencies(recipe.Element1)...)
+		deps = append(deps, buildDependencies(recipe.Element2)...)
+
+		// Add this recipe
+		elementRecipes[elementID] = recipe
+		deps = append(deps, recipe)
+
+		return deps
+	}
+
+	// Build complete dependency list
+	allRecipes := []model.Recipe{}
+	for _, recipe := range path {
+		// Add dependencies for both elements
+		allRecipes = append(allRecipes, buildDependencies(recipe.Element1)...)
+		allRecipes = append(allRecipes, buildDependencies(recipe.Element2)...)
+		// Add the recipe itself
+		allRecipes = append(allRecipes, recipe)
+	}
+
+	// Remove duplicates while preserving order
+	seen := make(map[string]bool)
+	uniqueRecipes := []model.Recipe{}
+	for _, recipe := range allRecipes {
+		key := fmt.Sprintf("%s+%s", recipe.Element1, recipe.Element2)
+		if !seen[key] {
+			seen[key] = true
+			uniqueRecipes = append(uniqueRecipes, recipe)
+		}
+	}
+
+	return uniqueRecipes
 }
 func MultiBFS(db *model.ElementsDatabase, targetElement string, maxPaths int, step chan<- *SearchProgress) *BFSResult {
 	sortedDb := utility.SortByTier(db)

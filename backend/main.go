@@ -9,15 +9,31 @@ import (
 	"fmt"
 )
 
-func printResult(paths [][]model.Recipe, visited int) {
-	fmt.Printf("Visited Nodes: %d\n", visited)
-	fmt.Printf("Total Paths Found: %d\n", len(paths))
-	for i, path := range paths {
-		fmt.Printf("Path %d:\n", i+1)
-		for _, recipe := range path {
-			fmt.Printf("  %s + %s\n", recipe.Element1, recipe.Element2)
+func printBFSResult(result *algorithm.BFSResult, db *model.ElementsDatabase) {
+	fmt.Printf("Target: %s\n", result.TargetElement)
+	fmt.Printf("Visited nodes: %d\n", result.VisitedNodes)
+	fmt.Printf("Paths found: %d\n\n", len(result.Paths))
+
+	for i, path := range result.Paths {
+		fmt.Printf("Path %d (%d steps):\n", i+1, len(path))
+		for j, recipe := range path {
+			resultElement := findRecipeResult(recipe, db)
+			fmt.Printf("  Step %d: %s + %s -> %s\n",
+				j+1, recipe.Element1, recipe.Element2, resultElement)
+		}
+		fmt.Println()
+	}
+}
+func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
+	for elementName, element := range db.Elements {
+		for _, r := range element.Recipes {
+			if (r.Element1 == recipe.Element1 && r.Element2 == recipe.Element2) ||
+				(r.Element1 == recipe.Element2 && r.Element2 == recipe.Element1) {
+				return elementName
+			}
 		}
 	}
+	return "unknown"
 }
 func main() {
 
@@ -39,15 +55,15 @@ func main() {
 	// }
 	// fmt.Println(string(output))
 
-	target := "Energy" // Ganti dengan elemen target yang kamu ingin cari
-	maxPaths := 100    // Jumlah maksimal jalur yang dicari
+	target := "Clay" // Ganti dengan elemen target yang kamu ingin cari
+	maxPaths := 100  // Jumlah maksimal jalur yang dicari
 
 	fmt.Println("\n===== Hasil BFS =====")
 	bfsResult := algorithm.MultiBFS(db, target, maxPaths, nil)
-	printResult(bfsResult.Paths, bfsResult.VisitedNodes)
+	printBFSResult(bfsResult, db)
 
-	fmt.Println("\n===== Hasil DFS =====")
-	dfsResult := algorithm.MultiDFS(db, target, maxPaths, nil)
-	printResult(dfsResult.Paths, dfsResult.VisitedNodes)
+	//fmt.Println("\n===== Hasil DFS =====")
+	//dfsResult := algorithm.MultiDFS(db, target, maxPaths, nil)
+	//printResult(dfsResult.Paths, dfsResult.VisitedNodes)
 
 }
