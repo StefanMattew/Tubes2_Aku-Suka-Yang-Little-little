@@ -1,9 +1,9 @@
+
 package algorithm
 
 import (
-	"backend/src/model"
-	"backend/src/utility"
-	"fmt"
+	"shared/model"
+	"shared/utility"
 )
 
 type DFSResult struct {
@@ -33,9 +33,14 @@ func DFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 		return
 	}
 
-	visited := make(map[string]bool)
+	visitedElements := make(map[string]bool) // Track visited elements, not combinations
 	paths := make([][]model.Recipe, 0)
 	visitedCount := 0
+
+	// Inisialisasi dengan elemen dasar
+	for _, el := range startElements {
+		visitedElements[el] = true
+	}
 
 	var dfsRecursive func(current string, path []model.Recipe, depth int) bool
 	dfsRecursive = func(current string, path []model.Recipe, depth int) bool {
@@ -51,7 +56,7 @@ func DFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 				CurrentElement: current,
 				Visited:        visitedCount,
 				PathsFound:     len(paths),
-				VisitedNodes:   visited,
+				VisitedNodes:   visitedElements,
 			}
 		}
 
@@ -60,43 +65,48 @@ func DFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 			return maxPath > 0 && len(paths) >= maxPath
 		}
 
-		element, exists := db.Elements[current]
-		if !exists {
-			return false
-		}
+		for resultElementID, resultElement := range db.Elements {
+			resultTier := utility.ParseTier(resultElement.Tier)
 
-		// If basic element
-		// if element.IsBasic {
-		// 	return false
-		// }
-		currentTier := utility.ParseTier(element.Tier)
+			for _, recipe := range resultElement.Recipes {
+				// Check if the recipe creates the current element
+				if resultElementID == current {
+					// Check if ingredients are already discovered
+					if visitedElements[recipe.Element1] && visitedElements[recipe.Element2] {
+						r1, ok1 := db.Elements[recipe.Element1]
+						r2, ok2 := db.Elements[recipe.Element2]
 
-		// Look for recipes to create this element
-		for _, recipe := range element.Recipes {
-			r1, ok1 := db.Elements[recipe.Element1]
-			r2, ok2 := db.Elements[recipe.Element2]
+						if !ok1 || !ok2 {
+							continue
+						}
 
-			// validasi tier elemen pembentuk harus lebih kecil dari tier target
-			if !ok1 || !ok2 || utility.ParseTier(r1.Tier) >= currentTier || utility.ParseTier(r2.Tier) >= currentTier {
-				continue
-			}
+						t1 := utility.ParseTier(r1.Tier)
+						t2 := utility.ParseTier(r2.Tier)
 
-			recipeKey := fmt.Sprintf("%s-%s-%s", current, recipe.Element1, recipe.Element2)
-			if visited[recipeKey] {
-				continue
-			}
+						if t1 >= resultTier || t2 >= resultTier {
+							continue
+						}
 
-			visited[recipeKey] = true
+						// Simpan path
+						newPath := make([]model.Recipe, len(path)+1)
+						copy(newPath, path)
+						newPath[len(path)] = recipe
 
-			newPath := make([]model.Recipe, len(path)+1)
-			copy(newPath, path)
-			newPath[len(path)] = recipe
+						// Mark result element as visited (discovered)
+						visitedElements[resultElementID] = true
 
-			if dfsRecursive(recipe.Element1, newPath, depth+1) {
-				return true
-			}
-			if dfsRecursive(recipe.Element2, newPath, depth+1) {
-				return true
+						// Lanjut DFS ke elemen hasil kombinasi (result)
+						if dfsRecursive(recipe.Element1, newPath, depth+1) {
+							return true
+						}
+						if dfsRecursive(recipe.Element2, newPath, depth+1) {
+							return true
+						}
+
+						// Backtrack: Unmark if path not found (optional, but can help with finding other paths)
+						visitedElements[resultElementID] = false
+					}
+				}
 			}
 		}
 
@@ -105,7 +115,6 @@ func DFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 
 	// Start DFS from basic elements
 	for _, basicElement := range startElements {
-		visited[basicElement] = true
 		dfsRecursive(basicElement, []model.Recipe{}, 0)
 
 		// If we've found enough paths, exit

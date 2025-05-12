@@ -1,12 +1,22 @@
 package utility
 
 import (
-	"backend/src/model"
 	"encoding/json"
 	"os"
+	"shared/model"
 	"strconv"
 	"strings"
 )
+
+const DefaultElementsPath = "../shared/data/elements.json" // "../shared/data/elements.json" jika relatif dari `bfs/`
+
+func LoadDatabase() *model.ElementsDatabase {
+	db, err := LoadElementsFromFile(DefaultElementsPath)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
 
 func LoadElementsFromFile(path string) (*model.ElementsDatabase, error) {
 	data, err := os.ReadFile(path)

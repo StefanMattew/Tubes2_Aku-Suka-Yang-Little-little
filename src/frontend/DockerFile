@@ -1,0 +1,19 @@
+# Gunakan image Node.js LTS
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Salin file package dan install dependencies
+COPY package.json package-lock.json ./
+RUN npm install
+
+# Salin semua file lainnya
+COPY . .
+
+# Build aplikasi Next.js
+RUN npm run build
+
+# Jalankan aplikasi
+EXPOSE 3000
+CMD ["npm", "start"]

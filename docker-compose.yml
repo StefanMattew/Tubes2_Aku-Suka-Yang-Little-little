@@ -1,0 +1,64 @@
+# # version: '3.8'
+
+# services:
+#   frontend:
+#     build:
+#       context: ./src/frontend
+#     ports:
+#       - "3000:3000"
+#     # depends_on:
+#     #   - bfs
+#     #   - dfs
+#     # networks:
+#     #   - app-network
+#     volumes:
+#       - ./src/Frontend:/app
+#   # bfs:
+#   #   build:
+#   #     context: ./src/Backend/bfs
+#   #   ports:
+#   #     - "8081:8081"
+#   #   networks:
+#   #     - app-network
+
+#   # dfs:
+#   #   build:
+#   #     context: ./src/Backend/dfs
+#   #   ports:
+#   #     - "8082:8082"
+#   #   networks:
+#   #     - app-network
+
+# networks:
+#   app-network:
+#     driver: bridge
+
+version: "3.9"
+services:
+  frontend:
+    build: ./src/Frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - bfs
+      - dfs
+    networks:
+      - alchemy-net
+
+  bfs:
+    build: ./src/Backend/bfs
+    ports:
+      - "8081:8081"
+    networks:
+      - alchemy-net
+
+  dfs:
+    build: ./src/Backend/dfs
+    ports:
+      - "8082:8082"
+    networks:
+      - alchemy-net
+
+networks:
+  alchemy-net:
+    driver: bridge

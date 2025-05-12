@@ -5,20 +5,6 @@
 // 	ImageURL string      `json:"image_url"`
 // }
 
-// type SearchRequest struct {
-// 	StartElements []string `json:"startElements"`
-// 	Target        string   `json:"target"`
-// 	Method        string   `json:"method"`    // BFS / DFS / BIDIR
-// 	Mode          string   `json:"mode"`      // single / multiple
-// 	MaxRecipes    int      `json:"maxRecipe"` // untuk multiple
-// }
-
-// type SearchResult struct {
-// 	Recipes      [][]string `json:"recipes"`
-// 	ElapsedTime  int64      `json:"elapsedTime"`  // dalam ms
-// 	VisitedNodes int        `json:"visitedNodes"` // jumlah node yang dikunjungi
-// }
-
 package model
 
 type Recipe struct {
@@ -35,6 +21,20 @@ type Element struct {
 	Tier    string   `json:"tier,omitempty"` // 0 untuk basic, 1 untuk hasil kombinasi basic, dst
 }
 
+type SearchRequest struct {
+	StartElements []string `json:"startElements"`
+	Target        string   `json:"target"`
+	Method        string   `json:"method"`    // BFS / DFS / BIDIR
+	Mode          string   `json:"mode"`      // single / multiple
+	MaxRecipes    int      `json:"maxRecipe"` // untuk multiple
+}
+
+type SearchResult struct {
+	Recipes      [][]string `json:"recipes"`
+	ElapsedTime  int64      `json:"elapsedTime"`  // dalam ms
+	VisitedNodes int        `json:"visitedNodes"` // jumlah node yang dikunjungi
+
+}
 type ElementsDatabase struct {
 	Elements map[string]Element `json:"elements"`
 }
@@ -43,6 +43,12 @@ type ScrapeElement struct {
 	Combos [][2]string `json:"combos"`
 	Image  string      `json:"image"`
 	Tier   string      `json:"tier"`
+}
+
+type TreeNode struct {
+	Name     string      `json:"name"`
+	Recipe   *Recipe     `json:"recipe,omitempty"` // step untuk membentuk node ini
+	Children []*TreeNode `json:"children,omitempty"`
 }
 
 func ConvertToElement(id string, scraped ScrapeElement) Element {

@@ -1,7 +1,8 @@
 package scrapper
 
+// go get github.com/PuerkitoBio/goquery@v1.10.3
+
 import (
-	"backend/src/model"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,13 +10,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"shared/model"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-const DEFAULT_ELEMENTS_PATH = "src/data/elements.json"
-const IMAGE_DIR = "src/data/images"
+const DEFAULT_ELEMENTS_PATH = "../shared/data/elements.json"
+const IMAGE_DIR = "../shared/data/images"
 
 func downloadImage(url, name string) (string, error) {
 	resp, err := http.Get(url)

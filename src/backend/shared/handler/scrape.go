@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"backend/src/scrapper"
+	"shared/scrapper"
 	"log"
 )
 
