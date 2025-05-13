@@ -1,103 +1,169 @@
-import Image from "next/image";
+"use client";
+import { useEffect, useState } from "react";
+import ElementCardSelector from "../components/ElementCardSelector";
+import SearchButton from "../components/SearchButton";
+import ResultTree from "../components/ResultTree";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [target, setTarget] = useState("");
+  const [allElements, setAllElements] = useState([]);
+  const [method, setMethod] = useState("BFS");
+  const [mode, setMode] = useState("single");
+  const [maxRecipe, setMaxRecipe] = useState(3);
+  const [result, setResult] = useState([]);
+  const [isLoading, setIsLoading] = useState(false); // Untuk loading indicator
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  useEffect(() => {
+    setIsLoading(true);
+    fetch("http://localhost:8081/elements-info")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Gagal memuat info elemen: ${res.statusText}`);
+        return res.json();
+      })
+      .then((allElements) => {
+        setAllElements(allElements); // ✅ langsung ambil dari .json()
+      })
+      .catch((error) => {
+        console.error("Gagal memuat data dari backend:", error);
+        setAllElements([
+          { name: "Air", imagePath: "http://localhost:8081/images/air.png", tier: "Starting elements" },
+          { name: "Water", imagePath: "http://localhost:8081/images/water.png", tier: "Starting elements" },
+          { name: "Fire", imagePath: "http://localhost:8081/images/fire.png", tier: "Starting elements" },
+          { name: "Earth", imagePath: "http://localhost:8081/images/earth.png", tier: "Starting elements" },
+        ]);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, []);
+
+
+  const handleSearch = async () => {
+    if (!target) return;
+    setIsLoading(true);
+    setResult([]); 
+
+    const backendURL =
+      method === "BFS"
+        ? "http://localhost:8081/search"
+        : "http://localhost:8082/search"; // Sesuaikan jika URL DFS berbeda
+
+    const body = {
+      target,
+      method,
+      mode,
+      ...(mode === "multiple" && { maxRecipe: Number(maxRecipe) }),
+    };
+
+    try {
+      const res = await fetch(backendURL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Terjadi kesalahan jaringan atau respons tidak valid."}));
+        throw new Error(errorData.message || `Gagal melakukan pencarian: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setResult(data.recipes && data.recipes.length > 0 ? data.recipes : ["Resep tidak ditemukan atau format tidak sesuai."]);
+
+    } catch (err) {
+      console.error("Error ketika searching path:", err);
+      setResult([`❌ ${err.message}`]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-100 to-blue-100 flex flex-col items-center p-4 md:p-6">
+      <div className="w-full max-w-5xl mx-auto">
+        <h1 className="text-4xl font-bold mb-6 md:mb-10 text-center text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-indigo-600 py-2">
+          Little Alchemy Solver 🧙✨
+        </h1>
+
+        <ElementCardSelector
+          allElements={allElements}
+          selectedElement={target}
+          onElementSelect={setTarget}
+        />
+
+        <div className="grid md:grid-cols-12 gap-6 md:gap-8">
+          <div className="md:col-span-4 bg-white/70 backdrop-blur-md p-6 rounded-xl shadow-xl">
+            <h2 className="text-xl font-semibold mb-5 text-indigo-700 border-b pb-2">Pengaturan Pencarian</h2>
+            
+            <div className="mb-4">
+              <label className="block mb-1.5 text-gray-700 font-medium">Metode Pencarian</label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="BFS">BFS</option>
+                <option value="DFS">DFS</option>
+              </select>
+            </div>
+
+            <div className="mb-4">
+              <label className="block mb-1.5 text-gray-700 font-medium">Mode Hasil</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="single">Single Recipe</option>
+                <option value="multiple">Multiple Recipe</option>
+              </select>
+            </div>
+
+            {mode === "multiple" && (
+              <div className="mb-5">
+                <label className="block mb-1.5 text-gray-700 font-medium">Jumlah Maksimal Resep</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10} // Batasi agar tidak terlalu banyak
+                  value={maxRecipe}
+                  onChange={(e) => setMaxRecipe(Number(e.target.value))}
+                  className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            )}
+
+            <SearchButton
+              label={isLoading ? "Mencari..." : `Cari Resep (${method})`}
+              onClick={handleSearch}
+              disabled={!target || isLoading}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            {isLoading && (
+              <div className="flex justify-center items-center mt-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+                <p className="ml-2 text-sm text-indigo-600">Sedang memproses...</p>
+              </div>
+            )}
+          </div>
+
+          <div className="md:col-span-8 bg-white/70 backdrop-blur-md p-6 rounded-xl shadow-xl min-h-[300px]">
+            {result && result.length > 0 ? (
+              <ResultTree
+                targetElement={target}
+                recipeSteps={result}
+                elementImages={Object.fromEntries(allElements.map(el => [el.name, el.imagePath]))}
+                live={true}
+              />
+              // <ResultTree targetElement={target} recipeSteps={result} elementImages={elementImages} />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                {!isLoading && !target && <p className="text-gray-500 text-lg">Pilih elemen target untuk memulai.</p>}
+                {!isLoading && target && result.length === 0 && <p className="text-gray-500 text-lg">Belum ada hasil. Klik "Cari Resep" untuk melihat visualisasi.</p>}
+              </div>
+            )}
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      </div>
+    </main>
   );
 }
