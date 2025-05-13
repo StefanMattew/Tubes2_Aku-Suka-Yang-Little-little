@@ -4,39 +4,104 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
 	"shared/algorithm"
 	"shared/model"
 	"shared/utility"
+	"sort"
+	"strings"
 	"time"
 )
 
-const IMAGE_DIRECTORY_PATH = "../shared/data/images"
+const DATA_DIRECTORY_PATH = "../shared/data"
+const IMAGE_DIRECTORY_SERVE_PATH = "/images/"
 
 var db *model.ElementsDatabase
+var tiersData map[string][]string
+
+type ElementInfo struct {
+	Name      string `json:"name"`
+	ImagePath string `json:"imagePath"` // URL lengkap ke gambar
+	Tier      string `json:"tier"`
+}
 
 func main() {
 	db = utility.LoadDatabase()
+	if db == nil || db.Elements == nil {
+		log.Fatal("Database elemen gagal dimuat atau kosong.")
+	}
 
-	http.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir(IMAGE_DIRECTORY_PATH))))
-	http.HandleFunc("/element-images", handleElementImages)
+	imageDirPath := filepath.Join(DATA_DIRECTORY_PATH, "images")
+	http.Handle(IMAGE_DIRECTORY_SERVE_PATH,
+		http.StripPrefix(IMAGE_DIRECTORY_SERVE_PATH, http.FileServer(http.Dir(imageDirPath))))
 
 	http.HandleFunc("/search", handleSearch)
-	http.HandleFunc("/elements", handleElements)
+	http.HandleFunc("/elements-info", handleElementsInfo)
 
 	log.Println("BFS Server listening at http://localhost:8081")
-	log.Fatal(http.ListenAndServe(":8081", nil))
+	log.Fatal(http.ListenAndServe(":8081", corsMiddleware(http.DefaultServeMux)))
 }
 
-func handleSearch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // Atau "*" jika lebih fleksibel
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handleElementsInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if r.Method != "POST" {
+
+	var elementsInfoList []ElementInfo
+	elementNames := make([]string, 0, len(db.Elements)) // Untuk sorting nama
+
+	for name := range db.Elements {
+		elementNames = append(elementNames, name)
+	}
+	sort.Strings(elementNames) // Urutkan nama elemen agar konsisten
+
+	for _, name := range elementNames {
+		el, ok := db.Elements[name]
+		if !ok {
+			continue // Seharusnya tidak terjadi jika iterasi dari keys db.Elements
+		}
+
+		currentTier := el.Tier // Asumsi Tier tidak ada yang null atau kosong
+
+		var imagePath string
+		if el.Icon != "" && !strings.HasPrefix(el.Icon, "/") { // Jika Icon adalah nama file saja
+			imagePath = "http://localhost:8081" + IMAGE_DIRECTORY_SERVE_PATH + el.Icon
+		} else if strings.HasPrefix(el.Icon, "/") { // Jika Icon sudah punya leading slash
+			imagePath = "http://localhost:8081" + el.Icon
+		} else {
+			imagePath = "http://localhost:8081" + IMAGE_DIRECTORY_SERVE_PATH + "placeholder.png" // Fallback
+		}
+
+		elementsInfoList = append(elementsInfoList, ElementInfo{
+			Name:      name,
+			ImagePath: imagePath,
+			Tier:      currentTier,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(elementsInfoList) // Kirim array objek ElementInfo
+}
+
+// handleSearch tetap sama, pastikan CORS ditangani
+func handleSearch(w http.ResponseWriter, r *http.Request) {
+	// CORS sudah ditangani oleh middleware
+	if r.Method != http.MethodPost { // Method POST untuk search
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -52,82 +117,27 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		req.StartElements = []string{"Air", "Water", "Fire", "Earth"}
 	}
 
+	log.Printf("Target: %s, Mode: %s, Max: %d\n", req.Target, req.Mode, req.MaxRecipes)
+
 	start := time.Now()
 	var res *algorithm.BFSResult
 	if req.Mode == "multiple" {
 		res = algorithm.MultiBFS(db, req.Target, req.MaxRecipes, nil)
 	} else {
-		// single = 1 recipe saja
-		res = algorithm.MultiBFS(db, req.Target, 1, nil)
+		res = algorithm.MultiBFS(db, req.Target, 1, nil) // single = 1 recipe
 	}
 	elapsed := time.Since(start)
 
-	json.NewEncoder(w).Encode(model.SearchResult{
-		Recipes:      convertRecipes(res.Paths),
-		ElapsedTime:  elapsed.Milliseconds(),
-		VisitedNodes: res.VisitedNodes,
-	})
-}
-
-func handleElements(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var names []string
-	for name := range db.Elements {
-		names = append(names, name)
-	}
-
-	json.NewEncoder(w).Encode(struct {
-		Elements []string `json:"elements"`
-	}{
-		Elements: names,
-	})
-}
-
-func convertRecipes(input [][]model.Recipe) [][]string {
-	var out [][]string
-	for _, recipeList := range input {
-		var steps []string
-		for _, r := range recipeList {
-			steps = append(steps, r.Element1+" + "+r.Element2)
-		}
-		out = append(out, steps)
-	}
-	return out
-}
-
-func handleElementImages(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	imageMap := make(map[string]string)
-	for name, el := range db.Elements {
-		imageMap[name] = "/images/" + el.Icon
+	// Pastikan res.Paths tidak nil sebelum mengirim
+	pathsToSend := res.Paths
+	if pathsToSend == nil {
+		pathsToSend = [][]model.Recipe{} // Kirim array kosong jika nil
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(imageMap)
+	json.NewEncoder(w).Encode(model.SearchResult{
+		Recipes:      pathsToSend,
+		ElapsedTime:  elapsed.Milliseconds(),
+		VisitedNodes: res.VisitedNodes,
+	})
 }

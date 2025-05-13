@@ -16,7 +16,7 @@ func main() {
 	db = utility.LoadDatabase()
 
 	http.HandleFunc("/search", handleSearch)
-	http.HandleFunc("/elements", handleElements)
+	// http.HandleFunc("/elements", handleElements)
 
 	log.Println("DFS Server listening at http://localhost:8082")
 	log.Fatal(http.ListenAndServe(":8082", nil))
@@ -48,6 +48,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		req.StartElements = []string{"Air", "Water", "Fire", "Earth"}
 	}
 
+	log.Printf("Target: %s, Mode: %s, Max: %d\n", req.Target, req.Mode, req.MaxRecipes)
+
 	start := time.Now()
 	var res *algorithm.DFSResult
 	if req.Mode == "multiple" {
@@ -59,32 +61,20 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	elapsed := time.Since(start)
 
 	json.NewEncoder(w).Encode(model.SearchResult{
-		Recipes:      convertRecipes(res.Paths),
+		Recipes:      res.Paths,
 		ElapsedTime:  elapsed.Milliseconds(),
 		VisitedNodes: res.VisitedNodes,
 	})
 }
 
-func handleElements(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+// func handleElements(w http.ResponseWriter, r *http.Request) {
+// 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	var keys []string
-	for k := range db.Elements {
-		keys = append(keys, k)
-	}
-	json.NewEncoder(w).Encode(map[string][]string{
-		"elements": keys,
-	})
-}
-
-func convertRecipes(input [][]model.Recipe) [][]string {
-	var out [][]string
-	for _, recipeList := range input {
-		var steps []string
-		for _, r := range recipeList {
-			steps = append(steps, r.Element1+" + "+r.Element2)
-		}
-		out = append(out, steps)
-	}
-	return out
-}
+// 	var keys []string
+// 	for k := range db.Elements {
+// 		keys = append(keys, k)
+// 	}
+// 	json.NewEncoder(w).Encode(map[string][]string{
+// 		"elements": keys,
+// 	})
+// }

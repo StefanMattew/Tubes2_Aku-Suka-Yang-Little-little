@@ -30,7 +30,7 @@ type SearchRequest struct {
 }
 
 type SearchResult struct {
-	Recipes      [][]string `json:"recipes"`
+	Recipes      [][]Recipe `json:"recipes"`
 	ElapsedTime  int64      `json:"elapsedTime"`  // dalam ms
 	VisitedNodes int        `json:"visitedNodes"` // jumlah node yang dikunjungi
 
@@ -69,14 +69,3 @@ func ConvertToElement(id string, scraped ScrapeElement) Element {
 		Tier:    scraped.Tier,
 	}
 }
-
-// func getBasicElement(e ElementsDatabase) Element {
-// 	if e.IsBasic= true {
-// 		 Element{
-// 			ID:      id,
-// 			Name:    id,
-// 			IsBasic: id == "air" || id == "water" || id == "fire" || id == "earth",
-// 			Recipes: recipes,
-// 			Icon:    scraped.Image,
-// 		}
-// }

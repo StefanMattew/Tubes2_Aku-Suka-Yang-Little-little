@@ -1,3 +1,64 @@
+
+│
+├── README.md
+│
+├── docker-compose.yml
+│
+├── doc/                        # Document files
+│   └── Laporan.pdf
+│
+└── src/                        # Source code files
+    ├── backend/                
+    │   ├── bfs
+    │   │   ├── main.go
+    │   │   ├── go.mod
+    │   │   └── dockerfile
+    │   ├── bfs
+    │   │   ├── main.go
+    │   │   ├── go.mod
+    │   │   └── dockerfile
+    │   └── shared/
+    │       ├── algorithm
+    │       │   ├── bfs.go
+    │       │   └── dfs.go
+    │       ├── data
+    │       │   ├── images/
+    │       │   ├── elements.json
+    │       │   └── tiers.json
+    │       ├── handdler
+    │       │   └── scrape.go
+    │       ├── model
+    │       │   └── element.go
+    │       ├── utility
+    │       │   └── loader.go
+    └── Frontend/                
+        ├── data 
+        │   ├── images/
+        │   ├── elements.json
+        │   └── tiers.json
+        ├── public
+        ├── src
+        │   ├── app
+        │   │   ├── layout.js
+        │   │   ├── global.css
+        │   │   └── page.js
+        │   ├── component
+        │   │   ├── ElementCardSelector.js
+        │   │   ├── ResultTree.js
+        │   │   ├── SearchButton.js
+        │   │   └── SearchButton.js
+        ├── dockerfile
+        ├── next.config.mjs
+        ├── postcss.config.mjs
+        ├── estlint.config.mjs
+        ├── package-lock.json
+        ├── package.json
+        └── jsconfig.json
+                                   
+        
+
+
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
 ## Getting Started

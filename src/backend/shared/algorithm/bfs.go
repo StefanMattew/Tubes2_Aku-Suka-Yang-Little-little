@@ -1,11 +1,12 @@
-
 package algorithm
 
 import (
-	"shared/model"
-	"shared/utility"
 	"container/list"
 	"fmt"
+	"log"
+	"shared/model"
+	"shared/utility"
+	"slices"
 )
 
 type BFSResult struct {
@@ -49,7 +50,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	}
 
 	visitedCombinations := make(map[string]bool)
-	discoveredElements := make(map[string]bool) // Semua elemen yang sudah ditemukan dari hasil kombinasi
+	discoveredElements := make(map[string]bool)
 	queue := list.New()
 
 	// Masukkan elemen dasar ke queue dan discovered
@@ -66,7 +67,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	paths := [][]model.Recipe{}
 	visitedCount := 0
 
-	for queue.Len() > 0 && (maxPath <= 0 || len(paths) < maxPath) {
+	for queue.Len() > 0 {
 		visitedCount++
 		node := queue.Remove(queue.Front()).(*BFSNode)
 
@@ -81,10 +82,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 
 		if node.Element == targetElement {
 			paths = append(paths, node.Path)
-			if maxPath > 0 && len(paths) >= maxPath {
-				break
-			}
-			continue
+			break
 		}
 
 		// Kombinasikan node ini dengan semua elemen yang sudah ditemukan sebelumnya
@@ -136,13 +134,106 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 			}
 		}
 	}
-
+	for i := range paths {
+		paths[i] = expandPath(paths[i], db, startElements)
+	}
 	result <- &BFSResult{
 		TargetElement: targetElement,
 		Paths:         paths,
 		VisitedNodes:  visitedCount,
 	}
 	close(result)
+}
+func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
+	// Track what we can make
+	available := make(map[string]bool)
+
+	// Mark basic elements as available
+	for _, elem := range startElements {
+		available[elem] = true
+	}
+
+	expandedPath := []model.Recipe{}
+
+	// Process each recipe in the original path
+	for _, recipe := range path {
+		// Track elements being processed to detect cycles
+		processing := make(map[string]bool)
+
+		// Recursively add missing dependencies for Element1
+		addDependencies(&expandedPath, recipe.Element1, available, processing, db, startElements)
+
+		// Recursively add missing dependencies for Element2
+		addDependencies(&expandedPath, recipe.Element2, available, processing, db, startElements)
+
+		// Now add the main recipe
+		expandedPath = append(expandedPath, recipe)
+
+		// Mark the result as available
+		result := findRecipeResult(recipe, db)
+		if result != "" {
+			available[result] = true
+		}
+	}
+
+	return expandedPath
+}
+
+func addDependencies(expandedPath *[]model.Recipe, elementID string, available, processing map[string]bool, db *model.ElementsDatabase, startElements []string) {
+	// Check for cycles
+	if processing[elementID] {
+		log.Printf("Cycle detected: %s is already being processed", elementID)
+		return
+	}
+
+	// If already available or basic, nothing to do
+	if available[elementID] || isBasicElement(elementID, startElements) {
+		return
+	}
+
+	// Mark as being processed
+	processing[elementID] = true
+
+	// Find the recipe to make this element
+	element, exists := db.Elements[elementID]
+	if !exists || len(element.Recipes) == 0 {
+		processing[elementID] = false
+		return
+	}
+
+	recipe := element.Recipes[0] // Use first available recipe
+
+	// Check if this recipe would create a cycle
+	if recipe.Element1 == elementID || recipe.Element2 == elementID {
+		log.Printf("Self-referential recipe detected for %s", elementID)
+		processing[elementID] = false
+		return
+	}
+
+	// First, recursively add dependencies for the ingredients of this recipe
+	addDependencies(expandedPath, recipe.Element1, available, processing, db, startElements)
+	addDependencies(expandedPath, recipe.Element2, available, processing, db, startElements)
+
+	// Now add this recipe
+	*expandedPath = append(*expandedPath, recipe)
+
+	// Mark this element as available and done processing
+	available[elementID] = true
+	processing[elementID] = false
+}
+func isBasicElement(elementID string, startElements []string) bool {
+	return slices.Contains(startElements, elementID)
+}
+func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
+	for elementName, element := range db.Elements {
+		for _, r := range element.Recipes {
+			if (r.Element1 == recipe.Element1 && r.Element2 == recipe.Element2) ||
+				(r.Element1 == recipe.Element2 && r.Element2 == recipe.Element1) {
+				return elementName
+			}
+		}
+	}
+	return ""
 }
 func MultiBFS(db *model.ElementsDatabase, targetElement string, maxPaths int, step chan<- *SearchProgress) *BFSResult {
 	sortedDb := utility.SortByTier(db)

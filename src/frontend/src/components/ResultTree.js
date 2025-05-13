@@ -1,86 +1,154 @@
-"use client";
-import { motion, AnimatePresence } from "framer-motion";
+"use client"
+import { motion } from 'framer-motion';
+import { Fragment } from 'react';
 
-export default function ResultTree({ result, elementImages }) {
-  if (!result || result.length === 0) return null;
-
-  // Kalau hasil bukan object (berarti pesan error atau array string)
-  if (typeof result[0] !== "object") {
+export default function ResultTree({ targetElement, recipeSteps, elementImages }) {
+  if (!recipeSteps || recipeSteps.length === 0 || (recipeSteps.length > 0 && typeof recipeSteps[0] === 'string')) {
+    if (!recipeSteps || recipeSteps.length === 0) return null; 
     return (
       <div className="mt-6">
-        <h2 className="text-lg font-bold mb-2">Hasil:</h2>
-        <ul className="bg-gray-100 p-4 rounded shadow text-sm text-gray-800 font-mono space-y-1">
-          {result.map((step, index) => (
-            <li key={index}>{step}</li>
+        <h2 className="text-xl font-bold mb-3 text-indigo-700">
+          {targetElement ? `Hasil untuk ${targetElement}:` : 'Hasil:'}
+        </h2>
+        <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 p-4 rounded-md shadow text-sm font-mono space-y-1">
+          {recipeSteps.map((step, index) => (
+            <div key={index}>{step}</div>
           ))}
-        </ul>
+        </div>
       </div>
     );
   }
+  
+  const actualRecipePath = (Array.isArray(recipeSteps) && recipeSteps.length > 0 && Array.isArray(recipeSteps[0])) ? recipeSteps[0] : recipeSteps;   
 
-  // Bangun tree dari akhir ke awal (reverse)
-  const buildTree = (recipes, index = recipes.length - 1) => {
-    if (index < 0) return null;
-    const { element1, element2, result } = recipes[index];
-    return {
-      name: result,
-      children: [
-        { name: element1, children: [] },
-        { name: element2, children: [] },
-        buildTree(recipes, index - 1),
-      ].filter(Boolean),
+  const buildTreeFromSteps = (target, stepsToProcess) => {
+    console.log("Build tree for:", target);
+    console.log("Steps:", stepsToProcess);
+    if (!stepsToProcess || stepsToProcess.length === 0) return { name: target, children: [] };
+
+    if (!stepsToProcess || !Array.isArray(stepsToProcess) || stepsToProcess.length === 0) {
+      console.warn("Tidak ada langkah-langkah valid untuk diproses dalam buildTreeFromSteps setelah ekstraksi.");
+      return { name: target, children: [] };
+    }
+
+    const reversedSteps = [...stepsToProcess].reverse(); 
+    
+    let rootNode = { name: target, children: [] };
+    
+    const finalStep = reversedSteps.find(step => step && typeof step.result !== 'undefined' && step.result === target);
+
+    if (!finalStep) {
+      console.warn("Tidak ada langkah resep yang menghasilkan target utama:", target, reversedSteps);
+      const isBaseElementInSteps = stepsToProcess.some(step => step.element1 === target || step.element2 === target);
+
+      if (!stepsToProcess.some(step => step.result === target) && isBaseElementInSteps) {
+        return { name: target, children: [] }; // target adalah salah satu elemen dasar dalam resep yang diberikan tapi bukan hasil
+      }
+      return { name: target, children: [] };
+    }
+
+    // Fungsi rekursif untuk membangun node dan anak-anaknya
+    // `currentResultElement` adalah elemen yang sedang kita cari resepnya
+    const buildNode = (currentResultElement) => {
+        const producingStep = reversedSteps.find(s => s && typeof s.result !== 'undefined' && s.result === currentResultElement);
+        if (!producingStep) {
+            return { name: currentResultElement, children: [] };
+        }
+
+        const child1 = buildNode(producingStep.element1);
+        const child2 = buildNode(producingStep.element2);
+        
+        return {
+            name: currentResultElement,
+            children: [child1, child2].filter(Boolean) 
+        };
     };
+
+    rootNode = buildNode(target);
+    
+    return rootNode;
   };
 
-  const renderTree = (node) => {
-    if (!node) return null;
 
-    const imgSrc =
-      elementImages?.[node.name] &&
-      `http://localhost:8081${elementImages[node.name]}`;
+  const renderTreeNode = (node, depth = 0, index = 0, isRoot = false) => {
+    if (!node) return null;
+    const imgSrc = elementImages[node.name];
+    const hasChildren = node.children && node.children.length > 0;
+
+    // Styling untuk node
+    let nodeBgColor = 'bg-purple-100';
+    let nodeTextColor = 'text-purple-800';
+    let nodePStyle = 'px-3 py-1.5 rounded-lg shadow-md';
+
+    if (isRoot) {
+      nodeBgColor = 'bg-indigo-500';
+      nodeTextColor = 'text-white';
+      nodePStyle = 'px-4 py-2 rounded-lg shadow-lg text-base';
+    } else if (!hasChildren) { // Leaf node (elemen dasar dari resep)
+      nodeBgColor = 'bg-green-100';
+      nodeTextColor = 'text-green-800';
+    }
+
 
     return (
       <motion.li
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="ml-4 relative mb-2"
+        key={`${node.name}-${depth}-${index}`}
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: depth * 0.2 + index * 0.05, duration: 0.3 }}
+        className={`relative ${hasChildren ? 'pl-8' : 'pl-8'} mb-2 list-none`} // pl-8 untuk memberi ruang bagi garis
       >
-        <div className="flex items-center space-x-2 bg-blue-100 px-3 py-1 rounded-md shadow">
+        {/* Garis vertikal dari parent (kecuali root) */}
+        {!isRoot && (
+          <div className="absolute left-3 top-0 bottom-1/2 w-px bg-slate-400"></div>
+        )}
+        {/* Garis horizontal ke node */}
+        {!isRoot && (
+           <div className="absolute left-3 top-1/2 h-px w-5 bg-slate-400 transform -translate-y-1/2"></div>
+        )}
+
+        <div className={`flex items-center space-x-2 ${nodeBgColor} ${nodePStyle} inline-block`}>
           {imgSrc && (
             <img
               src={imgSrc}
               alt={node.name}
-              className="w-6 h-6 rounded border border-gray-300"
+              className={`w-7 h-7 rounded border ${isRoot ? 'border-indigo-300' : 'border-purple-300'}`}
+              onError={(e) => { e.target.onerror = null; e.target.src = '/images/elements/placeholder.png'; }}
             />
           )}
-          <span className="text-sm font-semibold text-blue-800 font-mono">
+          <span className={`font-semibold ${nodeTextColor} font-mono ${isRoot ? 'text-background' : 'text-sm'}`}>
             {node.name}
           </span>
         </div>
 
-        {node.children?.length > 0 && (
-          <motion.ul
-            className="ml-4 border-l-2 border-gray-300 pl-4 mt-1"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            {node.children.map(renderTree)}
-          </motion.ul>
+        {hasChildren && (
+          <ul className="mt-2"> {/* Tidak perlu border kiri di sini, diatur oleh pseudo-elemen atau garis absolut */}
+            {node.children.map((child, idx) => (
+              <Fragment key={`${node.name}-child-${child.name}-${idx}`}>
+                {renderTreeNode(child, depth + 1, idx, false)}
+              </Fragment>
+            ))}
+          </ul>
         )}
       </motion.li>
     );
   };
-
-  const tree = buildTree(result);
+  
+  // Bangun pohon dari target dan langkah-langkah resep
+  const treeData = buildTreeFromSteps(targetElement, actualRecipePath);
 
   return (
-    <div className="mt-6 w-full">
-      <h2 className="text-xl font-bold mb-3 text-indigo-700">
-        🌳 Visualisasi Resep
+    <div className="mt-2 w-full overflow-x-auto custom-scrollbar"> {/* overflow-x-auto di sini */}
+      <h2 className="text-2xl font-bold mb-4 text-indigo-700">
+        Recipe Tree: <span className="text-purple-600">{targetElement}</span>
       </h2>
-      <ul className="pl-2">{renderTree(tree)}</ul>
+      {treeData ? (
+        <ul className="pl-2"> {/* Hapus padding kiri jika garis diatur oleh li */}
+          {renderTreeNode(treeData, 0, 0, true)}
+        </ul>
+      ) : (
+        <p className="text-gray-600">Tidak dapat membuat pohon visualisasi.</p>
+      )}
     </div>
   );
 }
