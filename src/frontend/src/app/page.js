@@ -1,8 +1,11 @@
+
 "use client";
 import { useEffect, useState } from "react";
 import ElementCardSelector from "../components/ElementCardSelector";
 import SearchButton from "../components/SearchButton";
-import ResultTree from "../components/ResultTree";
+import dynamic from "next/dynamic";
+const ResultTree = dynamic(() => import("../components/ResultTree"), { ssr: false });
+
 
 export default function Home() {
   const [target, setTarget] = useState("");
@@ -11,7 +14,9 @@ export default function Home() {
   const [mode, setMode] = useState("single");
   const [maxRecipe, setMaxRecipe] = useState(3);
   const [result, setResult] = useState([]);
-  const [isLoading, setIsLoading] = useState(false); // Untuk loading indicator
+  const [elapsedTime, setElapsedTime] = useState("");
+  const [visitedNodes, setVisitedNodes] = useState("");
+  const [isLoading, setIsLoading] = useState(false); 
 
   useEffect(() => {
     setIsLoading(true);
@@ -21,7 +26,7 @@ export default function Home() {
         return res.json();
       })
       .then((allElements) => {
-        setAllElements(allElements); // ✅ langsung ambil dari .json()
+        setAllElements(allElements); 
       })
       .catch((error) => {
         console.error("Gagal memuat data dari backend:", error);
@@ -46,7 +51,7 @@ export default function Home() {
     const backendURL =
       method === "BFS"
         ? "http://localhost:8081/search"
-        : "http://localhost:8082/search"; // Sesuaikan jika URL DFS berbeda
+        : "http://localhost:8082/search"; 
 
     const body = {
       target,
@@ -69,7 +74,8 @@ export default function Home() {
 
       const data = await res.json();
       setResult(data.recipes && data.recipes.length > 0 ? data.recipes : ["Resep tidak ditemukan atau format tidak sesuai."]);
-
+      setElapsedTime(data.elapsedTime);
+      setVisitedNodes(data.visitedNodes);
     } catch (err) {
       console.error("Error ketika searching path:", err);
       setResult([`❌ ${err.message}`]);
@@ -84,13 +90,14 @@ export default function Home() {
         <h1 className="text-4xl font-bold mb-6 md:mb-10 text-center text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-indigo-600 py-2">
           Little Alchemy Solver 🧙✨
         </h1>
-
+        {/* {element card} */}
         <ElementCardSelector
           allElements={allElements}
           selectedElement={target}
           onElementSelect={setTarget}
-        />
+          />
 
+        {/* {user's input} */}
         <div className="grid md:grid-cols-12 gap-6 md:gap-8">
           <div className="md:col-span-4 bg-white/70 backdrop-blur-md p-6 rounded-xl shadow-xl">
             <h2 className="text-xl font-semibold mb-5 text-indigo-700 border-b pb-2">Pengaturan Pencarian</h2>
@@ -101,7 +108,7 @@ export default function Home() {
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
                 className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-              >
+                >
                 <option value="BFS">BFS</option>
                 <option value="DFS">DFS</option>
               </select>
@@ -113,7 +120,7 @@ export default function Home() {
                 value={mode}
                 onChange={(e) => setMode(e.target.value)}
                 className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-              >
+                >
                 <option value="single">Single Recipe</option>
                 <option value="multiple">Multiple Recipe</option>
               </select>
@@ -125,11 +132,11 @@ export default function Home() {
                 <input
                   type="number"
                   min={1}
-                  max={10} // Batasi agar tidak terlalu banyak
+                  max={7} 
                   value={maxRecipe}
                   onChange={(e) => setMaxRecipe(Number(e.target.value))}
                   className="w-full p-2.5 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                />
+                  />
               </div>
             )}
 
@@ -137,7 +144,7 @@ export default function Home() {
               label={isLoading ? "Mencari..." : `Cari Resep (${method})`}
               onClick={handleSearch}
               disabled={!target || isLoading}
-            />
+              />
             {isLoading && (
               <div className="flex justify-center items-center mt-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
@@ -146,11 +153,14 @@ export default function Home() {
             )}
           </div>
 
+          {/* {tree result} */}
           <div className="md:col-span-8 bg-white/70 backdrop-blur-md p-6 rounded-xl shadow-xl min-h-[300px]">
             {result && result.length > 0 ? (
               <ResultTree
                 targetElement={target}
                 recipeSteps={result}
+                time={elapsedTime}
+                nodes={visitedNodes}
                 elementImages={Object.fromEntries(allElements.map(el => [el.name, el.imagePath]))}
                 live={true}
               />
