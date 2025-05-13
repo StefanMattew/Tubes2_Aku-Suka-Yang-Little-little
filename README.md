@@ -10,7 +10,11 @@ Aplikasi web ini dirancang untuk membantu pengguna mencari kombinasi elemen dala
     + npm
   
 - Langkah menjalankan program
-
+    1. Clone repository ini
+    2. Buka terminal pada direktori backend
+    3. jalankan perintah "go run main.go"
+    4. Bka terminal baru di folder drontend
+    5. lakukan perintah "npm run dev"
 
 - Author
 Stefan Mattew Susanto 13523020
