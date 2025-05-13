@@ -161,7 +161,6 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	close(result)
 }
 func BFSWithCompleteExpansion(db *model.ElementsDatabase, startElements []string, targetElement string, result chan<- *BFSResult, step chan<- *SearchProgress) {
-	// First BFS to find main path
 	firstResult := make(chan *BFSResult, 1)
 	BFS(db, startElements, targetElement, 1, firstResult, step)
 
@@ -172,10 +171,8 @@ func BFSWithCompleteExpansion(db *model.ElementsDatabase, startElements []string
 		return
 	}
 
-	// Get the first path
 	path := initialResult.Paths[0]
 
-	// Iteratively expand until all dependencies are satisfied
 	expandedPath := iterativeExpansion(path, db, startElements, step)
 
 	result <- &BFSResult{
@@ -187,21 +184,16 @@ func BFSWithCompleteExpansion(db *model.ElementsDatabase, startElements []string
 }
 
 func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startElements []string, step chan<- *SearchProgress) []model.Recipe {
-	// Keep track of available elements
 	available := make(map[string]bool)
 
-	// Mark basic elements as available
 	for _, elem := range startElements {
 		available[elem] = true
 	}
 
-	// Current working path
 	workingPath := make([]model.Recipe, len(path))
 	copy(workingPath, path)
 
-	// Iterate until no more missing dependencies
 	for {
-		// Find all elements created by current path
 		createdElements := make(map[string]bool)
 		for _, recipe := range workingPath {
 			result := findRecipeResult(recipe, db)
@@ -210,7 +202,6 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 			}
 		}
 
-		// Merge available and created elements
 		allAvailable := make(map[string]bool)
 		for elem := range available {
 			allAvailable[elem] = true
@@ -219,12 +210,10 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 			allAvailable[elem] = true
 		}
 
-		// Find missing dependencies in the path
 		missingElements := []string{}
-		insertPositions := make(map[string]int) // Where to insert the sub-path for each missing element
+		insertPositions := make(map[string]int)
 
 		for i, recipe := range workingPath {
-			// Check Element1
 			if !allAvailable[recipe.Element1] {
 				if !contains(missingElements, recipe.Element1) {
 					missingElements = append(missingElements, recipe.Element1)
@@ -237,7 +226,6 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 				}
 			}
 
-			// Check Element2
 			if !allAvailable[recipe.Element2] {
 				if !contains(missingElements, recipe.Element2) {
 					missingElements = append(missingElements, recipe.Element2)
@@ -250,29 +238,23 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 				}
 			}
 
-			// Mark this recipe's result as available for subsequent recipes
 			result := findRecipeResult(recipe, db)
 			if result != "" {
 				allAvailable[result] = true
 			}
 		}
 
-		// If no missing elements, we're done
 		if len(missingElements) == 0 {
 			break
 		}
 
-		// For each missing element, find how to make it
 		newPath := []model.Recipe{}
 		lastInsertPos := -1
 
 		for i, recipe := range workingPath {
-			// Insert any sub-paths needed before this recipe
 			for _, missing := range missingElements {
 				if insertPositions[missing] == i {
-					// Only search if we haven't already inserted a path for this element
 					if lastInsertPos < i {
-						// Perform BFS to find how to make this missing element
 						subResult := make(chan *BFSResult, 1)
 						availableElements := keysFromMap(allAvailable)
 
@@ -284,11 +266,9 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 							subPath := subBFSResult.Paths[0]
 							log.Printf("Found path for %s: %d steps", missing, len(subPath))
 
-							// Add all recipes from the sub-path
 							for _, subRecipe := range subPath {
 								newPath = append(newPath, subRecipe)
 
-								// Update available elements
 								subResult := findRecipeResult(subRecipe, db)
 								if subResult != "" {
 									allAvailable[subResult] = true
@@ -299,7 +279,6 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 				}
 			}
 
-			// Add the original recipe
 			newPath = append(newPath, recipe)
 		}
 
@@ -309,12 +288,10 @@ func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startEl
 	return workingPath
 }
 
-// Helper function to check if slice contains element
 func contains(slice []string, element string) bool {
 	return slices.Contains(slice, element)
 }
 
-// Helper function to get keys from map
 func keysFromMap(m map[string]bool) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -336,7 +313,7 @@ func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
 
 type BannedRecipes struct {
 	mu     sync.Mutex
-	banned map[string][]int // element -> list of banned recipe indices
+	banned map[string][]int
 }
 
 func NewBannedRecipes() *BannedRecipes {
@@ -370,10 +347,8 @@ func (br *BannedRecipes) IsRecipeBanned(element string, recipeIndex int) bool {
 func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, targetElement string,
 	bannedRecipes *BannedRecipes, result chan<- *BFSResult, progress chan<- *SearchProgress) {
 
-	// Always ensure we send a result and close the channel
 	resultSent := false
 
-	// Always ensure we send a result and close the channel
 	defer func() {
 		if !resultSent {
 			result <- &BFSResult{
@@ -400,7 +375,6 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 	queue := list.New()
 	recipeUsed := make(map[string]int)
 
-	// Initialize with start elements
 	for _, basic := range startElements {
 		node := &BFSNode{
 			Element:    basic,
@@ -427,7 +401,6 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 				VisitedNodes:   discoveredElements,
 			}:
 			default:
-				// Don't block on progress
 			}
 		}
 
@@ -436,7 +409,6 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 			break
 		}
 
-		// Try combinations
 		for otherElementID := range discoveredElements {
 			e1, e2 := node.Element, otherElementID
 			if e1 > e2 {
@@ -449,19 +421,14 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 			}
 			visitedCombinations[combinationKey] = true
 
-			// Check all possible results
 			for resultElementID, resultElement := range db.Elements {
-				// Skip if already discovered (unless it's the target)
 				if discoveredElements[resultElementID] && resultElementID != targetElement {
 					continue
 				}
 
-				// Track if we found any valid recipe for this result
 				foundValidRecipe := false
 
-				// Check each recipe in order
 				for recipeIndex, recipe := range resultElement.Recipes {
-					// Skip if this recipe is banned
 					if bannedRecipes.IsRecipeBanned(resultElementID, recipeIndex) {
 						log.Printf("Skipping banned recipe %d for %s", recipeIndex, resultElementID)
 						continue
@@ -470,7 +437,6 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 					if (recipe.Element1 == e1 && recipe.Element2 == e2) ||
 						(recipe.Element1 == e2 && recipe.Element2 == e1) {
 
-						// Tier check
 						if !isValidTierProgression(recipe, resultElement, db) {
 							continue
 						}
@@ -492,20 +458,16 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 						}
 
 						foundValidRecipe = true
-						// Only use the first valid recipe found
 						break
 					}
 				}
 
 				if foundValidRecipe {
-					// We found a recipe for this result, no need to check more
 					break
 				}
 			}
 		}
 	}
-
-	// Log if no path was found
 	if len(paths) == 0 {
 		log.Printf("No path found to %s with current banned recipes", targetElement)
 	}
@@ -517,46 +479,38 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 	}
 }
 
-// Multiple path BFS with better error handling
 func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []string,
 	targetElement string, maxPaths int, timeoutSeconds int,
 	result chan<- *BFSResult) {
 
-	// Configuration
 	numWorkers := runtime.NumCPU()
 
-	// Channels for coordination
 	pathsChan := make(chan []model.Recipe, maxPaths*2)
 	workerTasks := make(chan int, maxPaths*3) // More buffer
 	done := make(chan bool, 1)
 
-	// Shared state
 	var mu sync.Mutex
 	collectedPaths := make([][]model.Recipe, 0, maxPaths)
 	bannedRecipes := NewBannedRecipes()
 	totalVisited := 0
 	failedAttempts := 0
 
-	// Context for timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	// Progress tracking
 	progressChan := make(chan *SearchProgress, 1000)
 
-	// Progress consumer
 	go func() {
 		for {
 			select {
 			case <-progressChan:
-				// Consume progress messages
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// Path collector goroutine
 	go func() {
 		for {
 			select {
@@ -569,7 +523,6 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 				if len(collectedPaths) < maxPaths && !isDuplicatePath(db, path, collectedPaths) {
 					collectedPaths = append(collectedPaths, path)
 
-					// Extract and ban recipes used in this path
 					usedRecipes := extractUsedRecipes(path, db)
 					for element, recipeIndex := range usedRecipes {
 						log.Printf("Path %d: Banning recipe %d for element %s",
@@ -588,7 +541,6 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 		}
 	}()
 
-	// Worker pool
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -602,7 +554,6 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 						return
 					}
 
-					// Check if we should stop
 					mu.Lock()
 					shouldStop := len(collectedPaths) >= maxPaths
 					currentFailed := failedAttempts
@@ -612,17 +563,14 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 						return
 					}
 
-					// Stop if too many failures
 					if currentFailed > maxPaths*2 {
 						log.Printf("Worker %d: Too many failed attempts (%d), stopping", workerID, currentFailed)
 						return
 					}
 
-					// Shuffle start elements for variety
 					shuffled := make([]string, len(startElements))
 					copy(shuffled, startElements)
-					if taskID > 0 { // Don't shuffle on first attempt
-						rand.Seed(time.Now().UnixNano() + int64(taskID))
+					if taskID > 0 {
 						rand.Shuffle(len(shuffled), func(i, j int) {
 							shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 						})
@@ -630,8 +578,7 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 
 					log.Printf("Worker %d: Starting search %d with elements %v", workerID, taskID, shuffled)
 
-					// Perform search with current banned recipes
-					searchCtx, searchCancel := context.WithTimeout(ctx, 20*time.Second) // Increased timeout
+					searchCtx, searchCancel := context.WithTimeout(ctx, 20*time.Second)
 					resultChan := make(chan *BFSResult, 1)
 
 					go BFSWithBannedRecipes(db, shuffled, targetElement,
@@ -648,7 +595,6 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 						if len(bfsResult.Paths) > 0 {
 							log.Printf("Worker %d: Found raw path with %d steps", workerID, len(bfsResult.Paths[0]))
 
-							// Expand the path
 							expandedPath := expandPathSimple(bfsResult.Paths[0], db, startElements)
 
 							log.Printf("Worker %d: Expanded path to %d steps", workerID, len(expandedPath))
@@ -684,11 +630,10 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 		}(i)
 	}
 
-	// Task generator
 	go func() {
 		defer close(workerTasks)
 
-		maxAttempts := maxPaths * 5 // More attempts
+		maxAttempts := maxPaths * 5
 		for i := 0; i < maxAttempts; i++ {
 			mu.Lock()
 			currentCount := len(collectedPaths)
@@ -711,24 +656,19 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 				log.Printf("Task generator: Context cancelled")
 				return
 			case <-time.After(100 * time.Millisecond):
-				// Don't block forever on sending tasks
 			}
 
-			// Small delay between tasks
 			time.Sleep(50 * time.Millisecond)
 		}
 
 		log.Printf("Task generator completed")
 	}()
 
-	// Wait for workers
 	wg.Wait()
 	log.Printf("All workers completed")
 
-	// Close paths channel
 	close(pathsChan)
 
-	// Wait for collector
 	select {
 	case <-done:
 		log.Printf("Collector completed")
@@ -738,7 +678,6 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 
 	close(progressChan)
 
-	// Send final result
 	mu.Lock()
 	finalPaths := make([][]model.Recipe, len(collectedPaths))
 	copy(finalPaths, collectedPaths)
@@ -756,15 +695,12 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 	close(result)
 }
 
-// Extract used recipes from a path
 func extractUsedRecipes(path []model.Recipe, db *model.ElementsDatabase) map[string]int {
 	usedRecipes := make(map[string]int)
 
 	for _, recipe := range path {
-		// Find which element this recipe creates
 		result := findRecipeResult(recipe, db)
 		if result != "" {
-			// Find the recipe index
 			element := db.Elements[result]
 			for recipeIndex, elementRecipe := range element.Recipes {
 				if isSameRecipe(recipe, elementRecipe) {
@@ -778,13 +714,11 @@ func extractUsedRecipes(path []model.Recipe, db *model.ElementsDatabase) map[str
 	return usedRecipes
 }
 
-// Check if path is duplicate
 func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existingPaths [][]model.Recipe) bool {
 	if len(existingPaths) == 0 {
 		return false
 	}
 
-	// Create a set of recipes in the new path
 	newRecipes := make(map[string]bool)
 	for _, recipe := range newPath {
 		result := findRecipeResult(recipe, db)
@@ -792,7 +726,6 @@ func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existin
 		newRecipes[key] = true
 	}
 
-	// Check against existing paths
 	for _, existingPath := range existingPaths {
 		if len(existingPath) != len(newPath) {
 			continue
@@ -816,18 +749,15 @@ func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existin
 	return false
 }
 
-// Simple path expansion
 func expandPathSimple(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
 	return iterativeExpansion(path, db, startElements, nil)
 }
 
-// Check if two recipes are the same
 func isSameRecipe(r1, r2 model.Recipe) bool {
 	return (r1.Element1 == r2.Element1 && r1.Element2 == r2.Element2) ||
 		(r1.Element1 == r2.Element2 && r1.Element2 == r2.Element1)
 }
 
-// Check tier progression
 func isValidTierProgression(recipe model.Recipe, resultElement model.Element, db *model.ElementsDatabase) bool {
 	r1, ok1 := db.Elements[recipe.Element1]
 	r2, ok2 := db.Elements[recipe.Element2]
