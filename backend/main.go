@@ -55,8 +55,8 @@ func main() {
 	// }
 	// fmt.Println(string(output))
 
-	target := "River" // Ganti dengan elemen target yang kamu ingin cari
-	maxPaths := 100     // Jumlah maksimal jalur yang dicari
+	target := "Human" // Ganti dengan elemen target yang kamu ingin cari
+	maxPaths := 100   // Jumlah maksimal jalur yang dicari
 
 	fmt.Println("\n===== Hasil BFS =====")
 	bfsResult := algorithm.MultiBFS(db, target, maxPaths, nil)

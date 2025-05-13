@@ -5,6 +5,8 @@ import (
 	"backend/src/utility"
 	"container/list"
 	"fmt"
+	"log"
+	"slices"
 )
 
 type BFSResult struct {
@@ -143,7 +145,7 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	close(result)
 }
 func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
-	// Track what we can already make
+	// Track what we can make
 	available := make(map[string]bool)
 
 	// Mark basic elements as available
@@ -151,42 +153,23 @@ func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements [
 		available[elem] = true
 	}
 
-	// Mark elements created by the path as available
-	for _, recipe := range path {
-		result := findRecipeResult(recipe, db)
-		if result != "" {
-			available[result] = true
-		}
-	}
-
 	expandedPath := []model.Recipe{}
 
-	// Process each recipe
+	// Process each recipe in the original path
 	for _, recipe := range path {
-		// Check what's missing for this recipe
-		needsE1 := !available[recipe.Element1]
-		needsE2 := !available[recipe.Element2]
+		// Track elements being processed to detect cycles
+		processing := make(map[string]bool)
 
-		// Add recipe for element1 if needed
-		if needsE1 {
-			if elem, exists := db.Elements[recipe.Element1]; exists && len(elem.Recipes) > 0 {
-				expandedPath = append(expandedPath, elem.Recipes[0])
-				available[recipe.Element1] = true
-			}
-		}
+		// Recursively add missing dependencies for Element1
+		addDependencies(&expandedPath, recipe.Element1, available, processing, db, startElements)
 
-		// Add recipe for element2 if needed
-		if needsE2 {
-			if elem, exists := db.Elements[recipe.Element2]; exists && len(elem.Recipes) > 0 {
-				expandedPath = append(expandedPath, elem.Recipes[0])
-				available[recipe.Element2] = true
-			}
-		}
+		// Recursively add missing dependencies for Element2
+		addDependencies(&expandedPath, recipe.Element2, available, processing, db, startElements)
 
-		// Add the main recipe
+		// Now add the main recipe
 		expandedPath = append(expandedPath, recipe)
 
-		// Mark result as available
+		// Mark the result as available
 		result := findRecipeResult(recipe, db)
 		if result != "" {
 			available[result] = true
@@ -194,6 +177,52 @@ func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements [
 	}
 
 	return expandedPath
+}
+
+func addDependencies(expandedPath *[]model.Recipe, elementID string, available, processing map[string]bool, db *model.ElementsDatabase, startElements []string) {
+	// Check for cycles
+	if processing[elementID] {
+		log.Printf("Cycle detected: %s is already being processed", elementID)
+		return
+	}
+
+	// If already available or basic, nothing to do
+	if available[elementID] || isBasicElement(elementID, startElements) {
+		return
+	}
+
+	// Mark as being processed
+	processing[elementID] = true
+
+	// Find the recipe to make this element
+	element, exists := db.Elements[elementID]
+	if !exists || len(element.Recipes) == 0 {
+		processing[elementID] = false
+		return
+	}
+
+	recipe := element.Recipes[0] // Use first available recipe
+
+	// Check if this recipe would create a cycle
+	if recipe.Element1 == elementID || recipe.Element2 == elementID {
+		log.Printf("Self-referential recipe detected for %s", elementID)
+		processing[elementID] = false
+		return
+	}
+
+	// First, recursively add dependencies for the ingredients of this recipe
+	addDependencies(expandedPath, recipe.Element1, available, processing, db, startElements)
+	addDependencies(expandedPath, recipe.Element2, available, processing, db, startElements)
+
+	// Now add this recipe
+	*expandedPath = append(*expandedPath, recipe)
+
+	// Mark this element as available and done processing
+	available[elementID] = true
+	processing[elementID] = false
+}
+func isBasicElement(elementID string, startElements []string) bool {
+	return slices.Contains(startElements, elementID)
 }
 func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
 	for elementName, element := range db.Elements {
