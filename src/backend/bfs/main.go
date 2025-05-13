@@ -98,7 +98,6 @@ func handleElementsInfo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(elementsInfoList) // Kirim array objek ElementInfo
 }
 
-// handleSearch tetap sama, pastikan CORS ditangani
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	// CORS sudah ditangani oleh middleware
 	if r.Method != http.MethodPost { // Method POST untuk search
@@ -122,9 +121,9 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var res *algorithm.BFSResult
 	if req.Mode == "multiple" {
-		res = algorithm.MultiBFS(db, req.Target, req.MaxRecipes, nil)
+		res = algorithm.Driver(db, req.Target, req.MaxRecipes, nil)
 	} else {
-		res = algorithm.MultiBFS(db, req.Target, 1, nil) // single = 1 recipe
+		res = algorithm.Driver(db, req.Target, 1, nil) // single = 1 recipe
 	}
 	elapsed := time.Since(start)
 

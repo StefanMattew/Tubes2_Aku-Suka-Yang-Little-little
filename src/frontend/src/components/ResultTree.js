@@ -118,5 +118,4 @@ export default function ResultTree({ targetElement, recipeSteps, time, nodes, el
       </div>
     </div>
   );
-
 }
