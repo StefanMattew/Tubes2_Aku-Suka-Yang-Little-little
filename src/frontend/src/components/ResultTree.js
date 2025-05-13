@@ -19,63 +19,75 @@ export default function ResultTree({ targetElement, recipeSteps, elementImages }
     );
   }
   
-  const actualRecipePath = (Array.isArray(recipeSteps) && recipeSteps.length > 0 && Array.isArray(recipeSteps[0])) ? recipeSteps[0] : recipeSteps;   
+  const actualRecipePath = (Array.isArray(recipeSteps) && recipeSteps.length > 0 && Array.isArray(recipeSteps[0])) 
+                           ? recipeSteps[0] 
+                           : recipeSteps;   
 
   const buildTreeFromSteps = (target, stepsToProcess) => {
-    console.log("Build tree for:", target);
-    console.log("Steps:", stepsToProcess);
-    if (!stepsToProcess || stepsToProcess.length === 0) return { name: target, children: [] };
 
     if (!stepsToProcess || !Array.isArray(stepsToProcess) || stepsToProcess.length === 0) {
-      console.warn("Tidak ada langkah-langkah valid untuk diproses dalam buildTreeFromSteps setelah ekstraksi.");
+      console.warn("buildTreeFromSteps - target:", target, ". Mengembalikkan leaf node.");
       return { name: target, children: [] };
     }
 
     const reversedSteps = [...stepsToProcess].reverse(); 
     
-    let rootNode = { name: target, children: [] };
-    
     const finalStep = reversedSteps.find(step => step && typeof step.result !== 'undefined' && step.result === target);
 
     if (!finalStep) {
-      console.warn("Tidak ada langkah resep yang menghasilkan target utama:", target, reversedSteps);
-      const isBaseElementInSteps = stepsToProcess.some(step => step.element1 === target || step.element2 === target);
-
-      if (!stepsToProcess.some(step => step.result === target) && isBaseElementInSteps) {
-        return { name: target, children: [] }; // target adalah salah satu elemen dasar dalam resep yang diberikan tapi bukan hasil
+      console.warn("buildTreeFromSteps - Tidak ada recipe yang ditemukan secara langsung untuk main target:", target, ".");
+      const isBaseElementInSteps = stepsToProcess.some(step => step && (step.element1 === target || step.element2 === target));
+      if (!stepsToProcess.some(step => step && step.result === target) && isBaseElementInSteps) {
+         console.log("buildTreeFromSteps - Target", target, ".");
+         return { name: target, children: [] };
       }
       return { name: target, children: [] };
     }
 
-    // Fungsi rekursif untuk membangun node dan anak-anaknya
-    // `currentResultElement` adalah elemen yang sedang kita cari resepnya
     const buildNode = (currentResultElement) => {
-        const producingStep = reversedSteps.find(s => s && typeof s.result !== 'undefined' && s.result === currentResultElement);
-        if (!producingStep) {
-            return { name: currentResultElement, children: [] };
-        }
 
-        const child1 = buildNode(producingStep.element1);
-        const child2 = buildNode(producingStep.element2);
-        
-        return {
-            name: currentResultElement,
-            children: [child1, child2].filter(Boolean) 
-        };
+      if (!currentResultElement || typeof currentResultElement !== 'string' || currentResultElement.trim() === "") {
+          console.warn("buildNode - Invalid currentResultElement:", currentResultElement, ". Returning null.");
+          return null; 
+      }
+
+      const producingStep = reversedSteps.find(s => s && typeof s.result === 'string' && s.result === currentResultElement);
+
+      if (!producingStep) {
+        return { name: currentResultElement, children: [] };
+      }
+
+      if (typeof producingStep.element1 !== 'string' || typeof producingStep.element2 !== 'string') {
+          console.warn("buildNode - currentResultElement", currentResultElement, "invalid element1 or element2:", JSON.parse(JSON.stringify(producingStep)));
+          return { name: currentResultElement, children: [] }; // Treat as leaf if ingredients are malformed
+      }
+
+      const child1Node = buildNode(producingStep.element1);
+      const child2Node = buildNode(producingStep.element2);
+      
+      const children = [child1Node, child2Node].filter(Boolean);
+      
+      return {
+        name: currentResultElement,
+        children: children 
+      };
     };
 
-    rootNode = buildNode(target);
-    
+    const rootNode = buildNode(target);
     return rootNode;
   };
 
+  const treeData = buildTreeFromSteps(targetElement, actualRecipePath);
+  console.log("ResultTree - treeData:", treeData ? JSON.parse(JSON.stringify(treeData)) : "null or undefined");
+
 
   const renderTreeNode = (node, depth = 0, index = 0, isRoot = false) => {
-    if (!node) return null;
+    if (!node || typeof node.name === 'undefined') { 
+        return null;
+    }
     const imgSrc = elementImages[node.name];
     const hasChildren = node.children && node.children.length > 0;
 
-    // Styling untuk node
     let nodeBgColor = 'bg-purple-100';
     let nodeTextColor = 'text-purple-800';
     let nodePStyle = 'px-3 py-1.5 rounded-lg shadow-md';
@@ -84,25 +96,22 @@ export default function ResultTree({ targetElement, recipeSteps, elementImages }
       nodeBgColor = 'bg-indigo-500';
       nodeTextColor = 'text-white';
       nodePStyle = 'px-4 py-2 rounded-lg shadow-lg text-base';
-    } else if (!hasChildren) { // Leaf node (elemen dasar dari resep)
+    } else if (!hasChildren) { 
       nodeBgColor = 'bg-green-100';
       nodeTextColor = 'text-green-800';
     }
 
-
     return (
       <motion.li
-        key={`${node.name}-${depth}-${index}`}
+        key={`${node.name}-${depth}-${index}`} 
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: depth * 0.2 + index * 0.05, duration: 0.3 }}
-        className={`relative ${hasChildren ? 'pl-8' : 'pl-8'} mb-2 list-none`} // pl-8 untuk memberi ruang bagi garis
+        className={`relative ${hasChildren ? 'pl-8' : 'pl-8'} mb-2 list-none`}
       >
-        {/* Garis vertikal dari parent (kecuali root) */}
         {!isRoot && (
           <div className="absolute left-3 top-0 bottom-1/2 w-px bg-slate-400"></div>
         )}
-        {/* Garis horizontal ke node */}
         {!isRoot && (
            <div className="absolute left-3 top-1/2 h-px w-5 bg-slate-400 transform -translate-y-1/2"></div>
         )}
@@ -122,9 +131,9 @@ export default function ResultTree({ targetElement, recipeSteps, elementImages }
         </div>
 
         {hasChildren && (
-          <ul className="mt-2"> {/* Tidak perlu border kiri di sini, diatur oleh pseudo-elemen atau garis absolut */}
+          <ul className="mt-2"> 
             {node.children.map((child, idx) => (
-              <Fragment key={`${node.name}-child-${child.name}-${idx}`}>
+              <Fragment key={`${node.name}-child-${child && child.name ? child.name : `unknownchild-${idx}`}-${idx}`}> {/* Added safety for child.name */}
                 {renderTreeNode(child, depth + 1, idx, false)}
               </Fragment>
             ))}
@@ -134,16 +143,18 @@ export default function ResultTree({ targetElement, recipeSteps, elementImages }
     );
   };
   
-  // Bangun pohon dari target dan langkah-langkah resep
-  const treeData = buildTreeFromSteps(targetElement, actualRecipePath);
+  if (!treeData) {
+    console.error("ResultTree - treeData = null atau undefined.");
+    return <p className="text-red-500">Error: Tidak dapat membuat data pohon.</p>;
+  }
 
   return (
-    <div className="mt-2 w-full overflow-x-auto custom-scrollbar"> {/* overflow-x-auto di sini */}
+    <div className="mt-2 w-full overflow-x-auto custom-scrollbar">
       <h2 className="text-2xl font-bold mb-4 text-indigo-700">
         Recipe Tree: <span className="text-purple-600">{targetElement}</span>
       </h2>
-      {treeData ? (
-        <ul className="pl-2"> {/* Hapus padding kiri jika garis diatur oleh li */}
+      {treeData && treeData.name ? ( 
+        <ul className="pl-2"> 
           {renderTreeNode(treeData, 0, 0, true)}
         </ul>
       ) : (

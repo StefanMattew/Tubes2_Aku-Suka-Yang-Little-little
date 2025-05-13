@@ -16,7 +16,6 @@ func main() {
 	db = utility.LoadDatabase()
 
 	http.HandleFunc("/search", handleSearch)
-	// http.HandleFunc("/elements", handleElements)
 
 	log.Println("DFS Server listening at http://localhost:8082")
 	log.Fatal(http.ListenAndServe(":8082", nil))
@@ -66,15 +65,3 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		VisitedNodes: res.VisitedNodes,
 	})
 }
-
-// func handleElements(w http.ResponseWriter, r *http.Request) {
-// 	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-// 	var keys []string
-// 	for k := range db.Elements {
-// 		keys = append(keys, k)
-// 	}
-// 	json.NewEncoder(w).Encode(map[string][]string{
-// 		"elements": keys,
-// 	})
-// }

@@ -10,6 +10,7 @@ package model
 type Recipe struct {
 	Element1 string `json:"element1"`
 	Element2 string `json:"element2"`
+	Result   string `json:"result"`
 }
 
 type Element struct {
