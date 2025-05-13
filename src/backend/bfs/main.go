@@ -13,12 +13,6 @@ import (
 	"time"
 )
 
-type SearchResult struct {
-	Recipes      [][]model.Recipe `json:"recipes"`
-	ElapsedTime  int64            `json:"elapsedTime"`  // dalam ms
-	VisitedNodes int              `json:"visitedNodes"` // jumlah node yang dikunjungi
-}
-
 const DATA_DIRECTORY_PATH = "../shared/data"
 const IMAGE_DIRECTORY_SERVE_PATH = "/images/"
 
@@ -104,7 +98,6 @@ func handleElementsInfo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(elementsInfoList) // Kirim array objek ElementInfo
 }
 
-// handleSearch tetap sama, pastikan CORS ditangani
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	// CORS sudah ditangani oleh middleware
 	if r.Method != http.MethodPost { // Method POST untuk search

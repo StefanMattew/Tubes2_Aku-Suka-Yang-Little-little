@@ -1,24 +1,8 @@
-# # Gunakan image Golang
-# FROM golang:1.21
-
-# WORKDIR /app
-
-# COPY go.mod go.sum ./
-# RUN go mod download
-
-# COPY . .
-
-# # Build binary
-# RUN go build -o main .
-
-# EXPOSE 8081  
-# CMD ["./main"]
-
 FROM golang:1.21
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY go.mod ./
 
 RUN go mod tidy
 RUN go build -o bfs .

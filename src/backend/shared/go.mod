@@ -1,6 +1,6 @@
 module shared
 
-go 1.24
+go 1.24.3
 
 require github.com/PuerkitoBio/goquery v1.10.3
 

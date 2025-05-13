@@ -1,4 +1,3 @@
-
 package algorithm
 
 import (

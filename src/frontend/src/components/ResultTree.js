@@ -1,4 +1,3 @@
-
 "use client";
 import { Tree, TreeNode } from 'react-organizational-chart';
 import styled from 'styled-components';
