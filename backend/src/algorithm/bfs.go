@@ -143,69 +143,68 @@ func BFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 	close(result)
 }
 func expandPath(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
-	isBasic := make(map[string]bool)
-	elementRecipes := make(map[string]model.Recipe)
+	// Track what we can already make
+	available := make(map[string]bool)
 
-	// Mark basic elements
+	// Mark basic elements as available
 	for _, elem := range startElements {
-		isBasic[elem] = true
+		available[elem] = true
 	}
 
-	// Build a complete recipe map with all dependencies
-	var buildDependencies func(elementID string) []model.Recipe
-	buildDependencies = func(elementID string) []model.Recipe {
-		// If basic element or already processed, return empty
-		if isBasic[elementID] {
-			return []model.Recipe{}
-		}
-
-		// If we already have a recipe for this element, don't process again
-		if _, exists := elementRecipes[elementID]; exists {
-			return []model.Recipe{}
-		}
-
-		// Find recipe for this element
-		element, exists := db.Elements[elementID]
-		if !exists || len(element.Recipes) == 0 {
-			return []model.Recipe{}
-		}
-
-		recipe := element.Recipes[0] // Take first recipe
-
-		// Get dependencies for both ingredients
-		deps := []model.Recipe{}
-		deps = append(deps, buildDependencies(recipe.Element1)...)
-		deps = append(deps, buildDependencies(recipe.Element2)...)
-
-		// Add this recipe
-		elementRecipes[elementID] = recipe
-		deps = append(deps, recipe)
-
-		return deps
-	}
-
-	// Build complete dependency list
-	allRecipes := []model.Recipe{}
+	// Mark elements created by the path as available
 	for _, recipe := range path {
-		// Add dependencies for both elements
-		allRecipes = append(allRecipes, buildDependencies(recipe.Element1)...)
-		allRecipes = append(allRecipes, buildDependencies(recipe.Element2)...)
-		// Add the recipe itself
-		allRecipes = append(allRecipes, recipe)
-	}
-
-	// Remove duplicates while preserving order
-	seen := make(map[string]bool)
-	uniqueRecipes := []model.Recipe{}
-	for _, recipe := range allRecipes {
-		key := fmt.Sprintf("%s+%s", recipe.Element1, recipe.Element2)
-		if !seen[key] {
-			seen[key] = true
-			uniqueRecipes = append(uniqueRecipes, recipe)
+		result := findRecipeResult(recipe, db)
+		if result != "" {
+			available[result] = true
 		}
 	}
 
-	return uniqueRecipes
+	expandedPath := []model.Recipe{}
+
+	// Process each recipe
+	for _, recipe := range path {
+		// Check what's missing for this recipe
+		needsE1 := !available[recipe.Element1]
+		needsE2 := !available[recipe.Element2]
+
+		// Add recipe for element1 if needed
+		if needsE1 {
+			if elem, exists := db.Elements[recipe.Element1]; exists && len(elem.Recipes) > 0 {
+				expandedPath = append(expandedPath, elem.Recipes[0])
+				available[recipe.Element1] = true
+			}
+		}
+
+		// Add recipe for element2 if needed
+		if needsE2 {
+			if elem, exists := db.Elements[recipe.Element2]; exists && len(elem.Recipes) > 0 {
+				expandedPath = append(expandedPath, elem.Recipes[0])
+				available[recipe.Element2] = true
+			}
+		}
+
+		// Add the main recipe
+		expandedPath = append(expandedPath, recipe)
+
+		// Mark result as available
+		result := findRecipeResult(recipe, db)
+		if result != "" {
+			available[result] = true
+		}
+	}
+
+	return expandedPath
+}
+func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
+	for elementName, element := range db.Elements {
+		for _, r := range element.Recipes {
+			if (r.Element1 == recipe.Element1 && r.Element2 == recipe.Element2) ||
+				(r.Element1 == recipe.Element2 && r.Element2 == recipe.Element1) {
+				return elementName
+			}
+		}
+	}
+	return ""
 }
 func MultiBFS(db *model.ElementsDatabase, targetElement string, maxPaths int, step chan<- *SearchProgress) *BFSResult {
 	sortedDb := utility.SortByTier(db)
