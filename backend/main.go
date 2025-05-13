@@ -7,6 +7,7 @@ import (
 	"backend/src/model"
 	"backend/src/utility"
 	"fmt"
+	"time"
 )
 
 func printBFSResult(result *algorithm.BFSResult, db *model.ElementsDatabase) {
@@ -55,12 +56,22 @@ func main() {
 	// }
 	// fmt.Println(string(output))
 
-	target := "Human" // Ganti dengan elemen target yang kamu ingin cari
-	maxPaths := 100   // Jumlah maksimal jalur yang dicari
+	target := "Vinegar" // Ganti dengan elemen target yang kamu ingin cari
+	maxPaths := 1       // Jumlah maksimal jalur yang dicari
 
 	fmt.Println("\n===== Hasil BFS =====")
+	startTime := time.Now()
 	bfsResult := algorithm.MultiBFS(db, target, maxPaths, nil)
-	printBFSResult(bfsResult, db)
+	duration := time.Since(startTime)
+	fmt.Printf("BFS with complete expansion took %s\n", duration)
+	fmt.Printf("Found %d paths to %s\n", len(bfsResult.Paths), bfsResult.TargetElement)
+	for i, path := range bfsResult.Paths {
+		fmt.Printf("\nPath %d (%d steps):\n", i+1, len(path))
+		for j, recipe := range path {
+			resultElement := findRecipeResult(recipe, db)
+			fmt.Printf("  Step %d: %s + %s -> %s\n", j+1, recipe.Element1, recipe.Element2, resultElement)
+		}
+	}
 
 	//fmt.Println("\n===== Hasil DFS =====")
 	//dfsResult := algorithm.MultiDFS(db, target, maxPaths, nil)
