@@ -7,9 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"runtime"
-	"slices"
 	"sync"
 	"time"
 )
@@ -20,20 +18,21 @@ type SearchStrategy struct {
 	PreferredTiers   []int
 	ShuffledElements []string
 }
-type SearchParams struct {
-	startElements []string
-	strategy      SearchStrategy
+
+type RecipeResultPair struct {
+	Recipe model.Recipe
+	Result string
 }
 
 type BFSResult struct {
-	TargetElement string           `json:"target_element"`
-	Paths         [][]model.Recipe `json:"recipes"`
-	VisitedNodes  int              `json:"visited_nodes"`
+	TargetElement string               `json:"target_element"`
+	Paths         [][]RecipeResultPair `json:"recipes"`
+	VisitedNodes  int                  `json:"visited_nodes"`
 }
 
 type BFSNode struct {
-	Element    string         `json:"element"`
-	Path       []model.Recipe `json:"path"`
+	Element    string             `json:"element"`
+	Path       []RecipeResultPair `json:"path"`
 	ParentNode *BFSNode
 }
 
@@ -44,254 +43,91 @@ type SearchProgress struct {
 	VisitedNodes   map[string]bool `json:"visitedNodes"`
 }
 
-func BFS(db *model.ElementsDatabase, startElements []string, targetElement string, maxPath int, result chan<- *BFSResult, step chan<- *SearchProgress) {
-	target, exists := db.Elements[targetElement]
-	if !exists {
-		result <- &BFSResult{
-			TargetElement: targetElement,
-			Paths:         [][]model.Recipe{},
-			VisitedNodes:  0,
-		}
-		close(result)
-		return
-	}
-	if target.IsBasic {
-		result <- &BFSResult{
-			TargetElement: targetElement,
-			Paths:         [][]model.Recipe{},
-			VisitedNodes:  1,
-		}
-		close(result)
-		return
-	}
-
-	visitedCombinations := make(map[string]bool)
-	discoveredElements := make(map[string]bool)
-	queue := list.New()
-
-	// Masukkan elemen dasar ke queue dan discovered
-	for _, basic := range startElements {
-		node := &BFSNode{
-			Element:    basic,
-			Path:       []model.Recipe{},
-			ParentNode: nil,
-		}
-		queue.PushBack(node)
-		discoveredElements[basic] = true
-	}
-
-	paths := [][]model.Recipe{}
-	visitedCount := 0
-
-	for queue.Len() > 0 {
-		visitedCount++
-		node := queue.Remove(queue.Front()).(*BFSNode)
-
-		if step != nil {
-			step <- &SearchProgress{
-				CurrentElement: node.Element,
-				Visited:        visitedCount,
-				PathsFound:     len(paths),
-				VisitedNodes:   discoveredElements,
-			}
-		}
-
-		if node.Element == targetElement {
-			paths = append(paths, node.Path)
-			break
-		}
-
-		// Kombinasikan node ini dengan semua elemen yang sudah ditemukan sebelumnya
-		for otherElementID := range discoveredElements {
-			e1, e2 := node.Element, otherElementID
-			if e1 > e2 {
-				e1, e2 = e2, e1
-			}
-			combinationKey := fmt.Sprintf("%s+%s", e1, e2)
-			if visitedCombinations[combinationKey] {
-				continue
-			}
-			visitedCombinations[combinationKey] = true
-
-			for resultElementID, resultElement := range db.Elements {
-				resultTier := utility.ParseTier(resultElement.Tier)
-				for _, recipe := range resultElement.Recipes {
-					// Check if the recipe uses the current element and another discovered element
-					if (recipe.Element1 == e1 && recipe.Element2 == e2) || (recipe.Element1 == e2 && recipe.Element2 == e1) {
-						// Cek tier agar tidak lompat ke atas
-						r1, ok1 := db.Elements[recipe.Element1]
-						r2, ok2 := db.Elements[recipe.Element2]
-						if !ok1 || !ok2 {
-							continue
-						}
-						t1 := utility.ParseTier(r1.Tier)
-						t2 := utility.ParseTier(r2.Tier)
-						if t1 >= resultTier || t2 >= resultTier {
-							continue
-						}
-
-						// Kombinasi valid, buat node baru
-						newPath := make([]model.Recipe, len(node.Path)+1)
-						copy(newPath, node.Path)
-						newPath[len(node.Path)] = recipe
-
-						newNode := &BFSNode{
-							Element:    resultElementID,
-							Path:       newPath,
-							ParentNode: node,
-						}
-						queue.PushBack(newNode)
-
-						if !discoveredElements[resultElementID] {
-							discoveredElements[resultElementID] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	//for i := range paths {
-	//	paths[i] = expandPath(paths[i], db, startElements)
-	//}
-	result <- &BFSResult{
-		TargetElement: targetElement,
-		Paths:         paths,
-		VisitedNodes:  visitedCount,
-	}
-	close(result)
-}
-func BFSWithCompleteExpansion(db *model.ElementsDatabase, startElements []string, targetElement string, result chan<- *BFSResult, step chan<- *SearchProgress) {
-	firstResult := make(chan *BFSResult, 1)
-	BFS(db, startElements, targetElement, 1, firstResult, step)
-
-	initialResult := <-firstResult
-	if len(initialResult.Paths) == 0 {
-		result <- initialResult
-		close(result)
-		return
-	}
-
-	path := initialResult.Paths[0]
-
-	expandedPath := iterativeExpansion(path, db, startElements, step)
-
-	result <- &BFSResult{
-		TargetElement: targetElement,
-		Paths:         [][]model.Recipe{expandedPath},
-		VisitedNodes:  initialResult.VisitedNodes,
-	}
-	close(result)
-}
-
-func iterativeExpansion(path []model.Recipe, db *model.ElementsDatabase, startElements []string, step chan<- *SearchProgress) []model.Recipe {
-	available := make(map[string]bool)
-
-	for _, elem := range startElements {
-		available[elem] = true
-	}
-
-	workingPath := make([]model.Recipe, len(path))
+// Iteratively run BFS to search for a path to a missing element.
+func iterativeExpansion(path []RecipeResultPair, db *model.ElementsDatabase, startElements []string, step chan<- *SearchProgress) []RecipeResultPair {
+	workingPath := make([]RecipeResultPair, len(path))
 	copy(workingPath, path)
 
+	//Make a createdElements list to track which elements have been created
+	createdElements := make(map[string]bool)
+	for _, elem := range startElements {
+		createdElements[elem] = true
+	}
+
+	iteration := 0
+	//Find a single missing element in the path from bottom up
 	for {
-		createdElements := make(map[string]bool)
-		for _, recipe := range workingPath {
-			result := findRecipeResult(recipe, db)
-			if result != "" {
-				createdElements[result] = true
+		iteration++
+		log.Printf("Expansion iteration %d", iteration)
+		missingElement := ""
+		missingPosition := -1
+
+		for i, recipePair := range workingPath {
+			if !createdElements[recipePair.Recipe.Element1] {
+				missingElement = recipePair.Recipe.Element1
+				missingPosition = i
+				log.Printf("Found missing element %s at position %d", missingElement, i)
+				break
+			}
+
+			if !createdElements[recipePair.Recipe.Element2] {
+				missingElement = recipePair.Recipe.Element2
+				missingPosition = i
+				log.Printf("Found missing element %s at position %d", missingElement, i)
+				break
+			}
+
+			//Add the element to the createdElements list using the Result from RecipeResultPair
+			if recipePair.Result != "" {
+				createdElements[recipePair.Result] = true
 			}
 		}
 
-		allAvailable := make(map[string]bool)
-		for elem := range available {
-			allAvailable[elem] = true
-		}
-		for elem := range createdElements {
-			allAvailable[elem] = true
-		}
-
-		missingElements := []string{}
-		insertPositions := make(map[string]int)
-
-		for i, recipe := range workingPath {
-			if !allAvailable[recipe.Element1] {
-				if !contains(missingElements, recipe.Element1) {
-					missingElements = append(missingElements, recipe.Element1)
-					result := findRecipeResult(recipe, db)
-					insertPositions[recipe.Element1] = i
-					if result != "" {
-						allAvailable[result] = true
-					}
-					break
-				}
-			}
-
-			if !allAvailable[recipe.Element2] {
-				if !contains(missingElements, recipe.Element2) {
-					missingElements = append(missingElements, recipe.Element2)
-					insertPositions[recipe.Element2] = i
-					result := findRecipeResult(recipe, db)
-					if result != "" {
-						allAvailable[result] = true
-					}
-					break
-				}
-			}
-
-			result := findRecipeResult(recipe, db)
-			if result != "" {
-				allAvailable[result] = true
-			}
-		}
-
-		if len(missingElements) == 0 {
+		//Loop breaking
+		if missingElement == "" {
+			log.Printf("No missing elements found, expansion complete")
 			break
 		}
 
-		newPath := []model.Recipe{}
-		lastInsertPos := -1
+		log.Printf("Searching for missing element: %s", missingElement)
+		subResult := make(chan *BFSResult, 1)
+		availableElements := keysFromMap(createdElements)
 
-		for i, recipe := range workingPath {
-			for _, missing := range missingElements {
-				if insertPositions[missing] == i {
-					if lastInsertPos < i {
-						subResult := make(chan *BFSResult, 1)
-						availableElements := keysFromMap(allAvailable)
+		//Run BFS to find the path to the missing element
+		go BFSWithOptions(db, availableElements, missingElement, []int{}, 1, subResult, nil)
 
-						log.Printf("Searching for missing element: %s", missing)
-						BFS(db, availableElements, missing, 1, subResult, step)
+		bfsResult := <-subResult
+		if len(bfsResult.Paths) == 0 {
+			log.Printf("Could not find path for %s, skipping", missingElement)
+			break
+		}
 
-						subBFSResult := <-subResult
-						if len(subBFSResult.Paths) > 0 {
-							subPath := subBFSResult.Paths[0]
-							log.Printf("Found path for %s: %d steps", missing, len(subPath))
+		subPath := bfsResult.Paths[0]
+		log.Printf("Found path for %s with %d steps", missingElement, len(subPath))
 
-							for _, subRecipe := range subPath {
-								newPath = append(newPath, subRecipe)
+		newPath := []RecipeResultPair{}
 
-								subResult := findRecipeResult(subRecipe, db)
-								if subResult != "" {
-									allAvailable[subResult] = true
-								}
-							}
-						}
-					}
-				}
+		//Insert the subPath in the correct position
+		for i, recipePair := range workingPath {
+			if i == missingPosition {
+				newPath = append(newPath, subPath...)
 			}
-
-			newPath = append(newPath, recipe)
+			newPath = append(newPath, recipePair)
 		}
 
 		workingPath = newPath
+
+		//Iteration limit
+		if iteration > 50 {
+			log.Printf("Max iterations reached, stopping expansion")
+			break
+		}
 	}
 
 	return workingPath
 }
 
-func contains(slice []string, element string) bool {
-	return slices.Contains(slice, element)
-}
-
+// Helper to get keys from a map
 func keysFromMap(m map[string]bool) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -299,61 +135,17 @@ func keysFromMap(m map[string]bool) []string {
 	}
 	return keys
 }
-func findRecipeResult(recipe model.Recipe, db *model.ElementsDatabase) string {
-	for elementName, element := range db.Elements {
-		for _, r := range element.Recipes {
-			if (r.Element1 == recipe.Element1 && r.Element2 == recipe.Element2) ||
-				(r.Element1 == recipe.Element2 && r.Element2 == recipe.Element1) {
-				return elementName
-			}
-		}
-	}
-	return ""
-}
 
-type BannedRecipes struct {
-	mu     sync.Mutex
-	banned map[string][]int
-}
-
-func NewBannedRecipes() *BannedRecipes {
-	return &BannedRecipes{
-		banned: make(map[string][]int),
-	}
-}
-
-func (br *BannedRecipes) BanRecipe(element string, recipeIndex int) {
-	br.mu.Lock()
-	defer br.mu.Unlock()
-
-	if _, exists := br.banned[element]; !exists {
-		br.banned[element] = make([]int, 0)
-	}
-	br.banned[element] = append(br.banned[element], recipeIndex)
-}
-
-func (br *BannedRecipes) IsRecipeBanned(element string, recipeIndex int) bool {
-	br.mu.Lock()
-	defer br.mu.Unlock()
-
-	bannedIndices, exists := br.banned[element]
-	if !exists {
-		return false
-	}
-
-	return slices.Contains(bannedIndices, recipeIndex)
-}
-
-func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, targetElement string,
-	bannedRecipes *BannedRecipes, result chan<- *BFSResult, progress chan<- *SearchProgress) {
+// Bare BFS function for both single and multi-threaded
+func BFSWithOptions(db *model.ElementsDatabase, startElements []string, targetElement string,
+	bannedTargetRecipes []int, maxPaths int, result chan<- *BFSResult, progress chan<- *SearchProgress) {
 
 	resultSent := false
-
 	defer func() {
 		if !resultSent {
 			result <- &BFSResult{
 				TargetElement: targetElement,
-				Paths:         [][]model.Recipe{},
+				Paths:         [][]RecipeResultPair{},
 				VisitedNodes:  0,
 			}
 		}
@@ -364,31 +156,49 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 	if !exists || target.IsBasic {
 		result <- &BFSResult{
 			TargetElement: targetElement,
-			Paths:         [][]model.Recipe{},
+			Paths:         [][]RecipeResultPair{},
 			VisitedNodes:  0,
 		}
+		resultSent = true
 		return
 	}
 
 	visitedCombinations := make(map[string]bool)
+
+	//Add banned recipes to visitedCombinations with result
+	for _, bannedIdx := range bannedTargetRecipes {
+		if bannedIdx < len(target.Recipes) {
+			recipe := target.Recipes[bannedIdx]
+			e1, e2 := recipe.Element1, recipe.Element2
+			if e1 > e2 {
+				e1, e2 = e2, e1
+			}
+			//Include target element
+			bannedKey := fmt.Sprintf("%s+%s->%s", e1, e2, targetElement)
+			visitedCombinations[bannedKey] = true
+			log.Printf("Banned combination: %s", bannedKey)
+		}
+	}
+
 	discoveredElements := make(map[string]bool)
 	queue := list.New()
-	recipeUsed := make(map[string]int)
 
+	//Initialize queue with start elements
 	for _, basic := range startElements {
 		node := &BFSNode{
 			Element:    basic,
-			Path:       []model.Recipe{},
+			Path:       []RecipeResultPair{},
 			ParentNode: nil,
 		}
 		queue.PushBack(node)
 		discoveredElements[basic] = true
 	}
 
-	paths := [][]model.Recipe{}
+	paths := [][]RecipeResultPair{}
 	visitedCount := 0
 
-	for queue.Len() > 0 && len(paths) == 0 {
+	//BFS main loop
+	for queue.Len() > 0 && (maxPaths <= 0 || len(paths) < maxPaths) {
 		visitedCount++
 		node := queue.Remove(queue.Front()).(*BFSNode)
 
@@ -406,70 +216,68 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 
 		if node.Element == targetElement {
 			paths = append(paths, node.Path)
-			break
+			if maxPaths > 0 && len(paths) >= maxPaths {
+				break
+			}
+			continue
 		}
 
+		//Try combinations with discovered elements
 		for otherElementID := range discoveredElements {
 			e1, e2 := node.Element, otherElementID
 			if e1 > e2 {
 				e1, e2 = e2, e1
 			}
 
-			combinationKey := fmt.Sprintf("%s+%s", e1, e2)
-			if visitedCombinations[combinationKey] {
-				continue
-			}
-			visitedCombinations[combinationKey] = true
-
-			for resultElementID, resultElement := range db.Elements {
-				if discoveredElements[resultElementID] && resultElementID != targetElement {
+			//Check all possible results for this combination
+			for resultElementName, resultElement := range db.Elements {
+				if discoveredElements[resultElementName] && resultElementName != targetElement {
 					continue
 				}
 
-				foundValidRecipe := false
+				//Create combination key with result
+				combinationKey := fmt.Sprintf("%s+%s->%s", e1, e2, resultElementName)
+				//If recipe->result already visited, skip
+				if visitedCombinations[combinationKey] {
+					continue
+				}
 
-				for recipeIndex, recipe := range resultElement.Recipes {
-					if bannedRecipes.IsRecipeBanned(resultElementID, recipeIndex) {
-						log.Printf("Skipping banned recipe %d for %s", recipeIndex, resultElementID)
-						continue
-					}
-
+				for _, recipe := range resultElement.Recipes {
 					if (recipe.Element1 == e1 && recipe.Element2 == e2) ||
 						(recipe.Element1 == e2 && recipe.Element2 == e1) {
 
 						if !isValidTierProgression(recipe, resultElement, db) {
 							continue
 						}
-
-						newPath := make([]model.Recipe, len(node.Path)+1)
+						//Mark this specific combination->result as visited
+						visitedCombinations[combinationKey] = true
+						//Create RecipeResultPair with recipe and result from element name
+						recipePair := RecipeResultPair{
+							Recipe: recipe,
+							Result: resultElementName,
+						}
+						newPath := make([]RecipeResultPair, len(node.Path)+1)
 						copy(newPath, node.Path)
-						newPath[len(node.Path)] = recipe
-
+						newPath[len(node.Path)] = recipePair
 						newNode := &BFSNode{
-							Element:    resultElementID,
+							Element:    resultElementName,
 							Path:       newPath,
 							ParentNode: node,
 						}
 						queue.PushBack(newNode)
-
-						if !discoveredElements[resultElementID] {
-							discoveredElements[resultElementID] = true
-							recipeUsed[resultElementID] = recipeIndex
+						if !discoveredElements[resultElementName] {
+							discoveredElements[resultElementName] = true
 						}
-
-						foundValidRecipe = true
 						break
 					}
-				}
-
-				if foundValidRecipe {
-					break
 				}
 			}
 		}
 	}
-	if len(paths) == 0 {
-		log.Printf("No path found to %s with current banned recipes", targetElement)
+
+	//Apply iterative expansion to all paths
+	for i := range paths {
+		paths[i] = iterativeExpansion(paths[i], db, startElements, progress)
 	}
 
 	result <- &BFSResult{
@@ -477,40 +285,28 @@ func BFSWithBannedRecipes(db *model.ElementsDatabase, startElements []string, ta
 		Paths:         paths,
 		VisitedNodes:  visitedCount,
 	}
+	resultSent = true
 }
 
-func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []string,
+func BFSSingle(db *model.ElementsDatabase, startElements []string, targetElement string,
+	result chan<- *BFSResult, progress chan<- *SearchProgress) {
+	BFSWithOptions(db, startElements, targetElement, []int{}, 1, result, progress)
+}
+
+func BFSMultipleThreaded(db *model.ElementsDatabase, startElements []string,
+	//Init
 	targetElement string, maxPaths int, timeoutSeconds int,
 	result chan<- *BFSResult) {
-
 	numWorkers := runtime.NumCPU()
-
-	pathsChan := make(chan []model.Recipe, maxPaths*2)
-	workerTasks := make(chan int, maxPaths*3) // More buffer
+	pathsChan := make(chan []RecipeResultPair, maxPaths*2)
+	tasks := make(chan BFSTask, 100)
 	done := make(chan bool, 1)
-
 	var mu sync.Mutex
-	collectedPaths := make([][]model.Recipe, 0, maxPaths)
-	bannedRecipes := NewBannedRecipes()
+	collectedPaths := make([][]RecipeResultPair, 0, maxPaths)
 	totalVisited := 0
-	failedAttempts := 0
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
-
-	progressChan := make(chan *SearchProgress, 1000)
-
-	go func() {
-		for {
-			select {
-			case <-progressChan:
-
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
+	//Threading Mumbo Jumbo
 	go func() {
 		for {
 			select {
@@ -520,17 +316,9 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 					return
 				}
 				mu.Lock()
-				if len(collectedPaths) < maxPaths && !isDuplicatePath(db, path, collectedPaths) {
+				if len(collectedPaths) < maxPaths && !isDuplicatePath(path, collectedPaths) {
 					collectedPaths = append(collectedPaths, path)
-
-					usedRecipes := extractUsedRecipes(path, db)
-					for element, recipeIndex := range usedRecipes {
-						log.Printf("Path %d: Banning recipe %d for element %s",
-							len(collectedPaths), recipeIndex, element)
-						bannedRecipes.BanRecipe(element, recipeIndex)
-					}
-
-					log.Printf("Found path %d/%d", len(collectedPaths), maxPaths)
+					log.Printf("Found path %d/%d with %d steps", len(collectedPaths), maxPaths, len(path))
 				}
 				mu.Unlock()
 
@@ -542,47 +330,41 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 	}()
 
 	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
+			progressChan := make(chan *SearchProgress, 100)
+			go func() {
+				for range progressChan {
+				}
+			}()
+
 			for {
 				select {
-				case taskID, ok := <-workerTasks:
+				case task, ok := <-tasks:
 					if !ok {
+						close(progressChan)
 						return
 					}
 
 					mu.Lock()
 					shouldStop := len(collectedPaths) >= maxPaths
-					currentFailed := failedAttempts
 					mu.Unlock()
 
 					if shouldStop {
-						return
+						continue
 					}
 
-					if currentFailed > maxPaths*2 {
-						log.Printf("Worker %d: Too many failed attempts (%d), stopping", workerID, currentFailed)
-						return
-					}
+					log.Printf("Worker %d: Processing task with shuffle %v, banned %v",
+						workerID, task.Shuffle, task.BannedRecipes)
 
-					shuffled := make([]string, len(startElements))
-					copy(shuffled, startElements)
-					if taskID > 0 {
-						rand.Shuffle(len(shuffled), func(i, j int) {
-							shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-						})
-					}
-
-					log.Printf("Worker %d: Starting search %d with elements %v", workerID, taskID, shuffled)
-
-					searchCtx, searchCancel := context.WithTimeout(ctx, 20*time.Second)
+					searchCtx, searchCancel := context.WithTimeout(ctx, 15*time.Second)
 					resultChan := make(chan *BFSResult, 1)
 
-					go BFSWithBannedRecipes(db, shuffled, targetElement,
-						bannedRecipes, resultChan, progressChan)
+					go BFSWithOptions(db, task.Shuffle, targetElement, task.BannedRecipes,
+						1, resultChan, progressChan)
 
 					select {
 					case bfsResult := <-resultChan:
@@ -593,37 +375,25 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 						mu.Unlock()
 
 						if len(bfsResult.Paths) > 0 {
-							log.Printf("Worker %d: Found raw path with %d steps", workerID, len(bfsResult.Paths[0]))
-
-							expandedPath := expandPathSimple(bfsResult.Paths[0], db, startElements)
-
-							log.Printf("Worker %d: Expanded path to %d steps", workerID, len(expandedPath))
-
 							select {
-							case pathsChan <- expandedPath:
+							case pathsChan <- bfsResult.Paths[0]:
 							case <-ctx.Done():
 								return
 							}
-						} else {
-							mu.Lock()
-							failedAttempts++
-							mu.Unlock()
-							log.Printf("Worker %d: No path found (attempt %d)", workerID, taskID)
 						}
 
 					case <-searchCtx.Done():
 						searchCancel()
-						mu.Lock()
-						failedAttempts++
-						mu.Unlock()
-						log.Printf("Worker %d: Search timeout for task %d", workerID, taskID)
+						log.Printf("Worker %d: Search timeout", workerID)
 
 					case <-ctx.Done():
 						searchCancel()
+						close(progressChan)
 						return
 					}
 
 				case <-ctx.Done():
+					close(progressChan)
 					return
 				}
 			}
@@ -631,61 +401,98 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 	}
 
 	go func() {
-		defer close(workerTasks)
+		defer close(tasks)
 
-		maxAttempts := maxPaths * 5
-		for i := 0; i < maxAttempts; i++ {
+		shuffles := generateFixedShuffles(startElements)
+
+		targetElem, exists := db.Elements[targetElement]
+		targetRecipeCount := 0
+		if exists {
+			targetRecipeCount = len(targetElem.Recipes)
+		}
+
+		for _, shuffle := range shuffles {
 			mu.Lock()
 			currentCount := len(collectedPaths)
-			currentFailed := failedAttempts
 			mu.Unlock()
 
 			if currentCount >= maxPaths {
-				log.Printf("Reached target path count: %d", currentCount)
 				break
 			}
 
-			if currentFailed > maxPaths*2 {
-				log.Printf("Too many failures, stopping task generation")
-				break
+			task := BFSTask{
+				Shuffle:       shuffle,
+				BannedRecipes: []int{},
 			}
 
 			select {
-			case workerTasks <- i:
+			case tasks <- task:
 			case <-ctx.Done():
-				log.Printf("Task generator: Context cancelled")
 				return
-			case <-time.After(100 * time.Millisecond):
 			}
-
-			time.Sleep(50 * time.Millisecond)
 		}
 
-		log.Printf("Task generator completed")
+		time.Sleep(500 * time.Millisecond)
+
+		bannedRecipes := []int{}
+		for recipeIdx := 0; recipeIdx < targetRecipeCount; recipeIdx++ {
+			mu.Lock()
+			currentCount := len(collectedPaths)
+			mu.Unlock()
+
+			if currentCount >= maxPaths {
+				break
+			}
+
+			bannedRecipes = append(bannedRecipes, recipeIdx)
+			log.Printf("Starting phase 2: Banning recipe %d", recipeIdx)
+
+			task := BFSTask{
+				Shuffle:       startElements,
+				BannedRecipes: append([]int{}, bannedRecipes...),
+			}
+
+			select {
+			case tasks <- task:
+			case <-ctx.Done():
+				return
+			}
+			for j := 0; j < min(3, len(shuffles)); j++ {
+				mu.Lock()
+				currentCount := len(collectedPaths)
+				mu.Unlock()
+
+				if currentCount >= maxPaths {
+					break
+				}
+
+				task := BFSTask{
+					Shuffle:       shuffles[j],
+					BannedRecipes: append([]int{}, bannedRecipes...),
+				}
+
+				select {
+				case tasks <- task:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
 	}()
 
 	wg.Wait()
-	log.Printf("All workers completed")
-
 	close(pathsChan)
 
 	select {
 	case <-done:
-		log.Printf("Collector completed")
 	case <-time.After(5 * time.Second):
-		log.Printf("Collector timeout")
 	}
 
-	close(progressChan)
-
 	mu.Lock()
-	finalPaths := make([][]model.Recipe, len(collectedPaths))
+	finalPaths := make([][]RecipeResultPair, len(collectedPaths))
 	copy(finalPaths, collectedPaths)
 	finalVisited := totalVisited
 	mu.Unlock()
-
-	log.Printf("Final result: %d paths found, %d nodes visited, %d failed attempts",
-		len(finalPaths), finalVisited, failedAttempts)
 
 	result <- &BFSResult{
 		TargetElement: targetElement,
@@ -695,34 +502,67 @@ func BFSMultiplePathsWithBanning(db *model.ElementsDatabase, startElements []str
 	close(result)
 }
 
-func extractUsedRecipes(path []model.Recipe, db *model.ElementsDatabase) map[string]int {
-	usedRecipes := make(map[string]int)
-
-	for _, recipe := range path {
-		result := findRecipeResult(recipe, db)
-		if result != "" {
-			element := db.Elements[result]
-			for recipeIndex, elementRecipe := range element.Recipes {
-				if isSameRecipe(recipe, elementRecipe) {
-					usedRecipes[result] = recipeIndex
-					break
-				}
-			}
-		}
-	}
-
-	return usedRecipes
+type BFSTask struct {
+	Shuffle       []string
+	BannedRecipes []int
 }
 
-func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existingPaths [][]model.Recipe) bool {
+func generateFixedShuffles(elements []string) [][]string {
+	if len(elements) != 4 {
+		return [][]string{elements}
+	}
+
+	perms := [][]string{}
+	a, b, c, d := elements[0], elements[1], elements[2], elements[3]
+
+	perms = append(perms, []string{a, b, c, d})
+	perms = append(perms, []string{a, b, d, c})
+	perms = append(perms, []string{a, c, b, d})
+	perms = append(perms, []string{a, c, d, b})
+	perms = append(perms, []string{a, d, b, c})
+	perms = append(perms, []string{a, d, c, b})
+	perms = append(perms, []string{b, a, c, d})
+	perms = append(perms, []string{b, a, d, c})
+	perms = append(perms, []string{b, c, a, d})
+	perms = append(perms, []string{b, c, d, a})
+	perms = append(perms, []string{b, d, a, c})
+	perms = append(perms, []string{b, d, c, a})
+	perms = append(perms, []string{c, a, b, d})
+	perms = append(perms, []string{c, a, d, b})
+	perms = append(perms, []string{c, b, a, d})
+	perms = append(perms, []string{c, b, d, a})
+	perms = append(perms, []string{c, d, a, b})
+	perms = append(perms, []string{c, d, b, a})
+	perms = append(perms, []string{d, a, b, c})
+	perms = append(perms, []string{d, a, c, b})
+	perms = append(perms, []string{d, b, a, c})
+	perms = append(perms, []string{d, b, c, a})
+	perms = append(perms, []string{d, c, a, b})
+	perms = append(perms, []string{d, c, b, a})
+
+	return perms
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func isDuplicatePath(newPath []RecipeResultPair, existingPaths [][]RecipeResultPair) bool {
 	if len(existingPaths) == 0 {
 		return false
 	}
 
 	newRecipes := make(map[string]bool)
-	for _, recipe := range newPath {
-		result := findRecipeResult(recipe, db)
-		key := fmt.Sprintf("%s+%s->%s", recipe.Element1, recipe.Element2, result)
+	for _, recipePair := range newPath {
+		e1, e2 := recipePair.Recipe.Element1, recipePair.Recipe.Element2
+		if e1 > e2 {
+			e1, e2 = e2, e1
+		}
+		//Use the Result from RecipeResultPair
+		key := fmt.Sprintf("%s+%s->%s", e1, e2, recipePair.Result)
 		newRecipes[key] = true
 	}
 
@@ -732,10 +572,19 @@ func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existin
 		}
 
 		matches := true
-		for _, recipe := range existingPath {
-			result := findRecipeResult(recipe, nil)
-			key := fmt.Sprintf("%s+%s->%s", recipe.Element1, recipe.Element2, result)
-			if !newRecipes[key] {
+		existingRecipes := make(map[string]bool)
+		for _, recipePair := range existingPath {
+			e1, e2 := recipePair.Recipe.Element1, recipePair.Recipe.Element2
+			if e1 > e2 {
+				e1, e2 = e2, e1
+			}
+			//Use the Result from RecipeResultPair
+			key := fmt.Sprintf("%s+%s->%s", e1, e2, recipePair.Result)
+			existingRecipes[key] = true
+		}
+
+		for key := range newRecipes {
+			if !existingRecipes[key] {
 				matches = false
 				break
 			}
@@ -747,15 +596,6 @@ func isDuplicatePath(db *model.ElementsDatabase, newPath []model.Recipe, existin
 	}
 
 	return false
-}
-
-func expandPathSimple(path []model.Recipe, db *model.ElementsDatabase, startElements []string) []model.Recipe {
-	return iterativeExpansion(path, db, startElements, nil)
-}
-
-func isSameRecipe(r1, r2 model.Recipe) bool {
-	return (r1.Element1 == r2.Element1 && r1.Element2 == r2.Element2) ||
-		(r1.Element1 == r2.Element2 && r1.Element2 == r2.Element1)
 }
 
 func isValidTierProgression(recipe model.Recipe, resultElement model.Element, db *model.ElementsDatabase) bool {
@@ -776,10 +616,10 @@ func MultiBFS(db *model.ElementsDatabase, targetElement string, maxPaths int, st
 	sortedDb := utility.SortByTier(db)
 	result := make(chan *BFSResult, 1)
 	startElement := []string{"Air", "Water", "Fire", "Earth"}
-	// Run BFS in a goroutine
-	go BFSWithCompleteExpansion(sortedDb, startElement, targetElement, result, step)
+	//Run BFS in a goroutine
+	go BFSSingle(sortedDb, startElement, targetElement, result, step)
 
-	// Wait for result
+	//Wait for result
 	results := <-result
 
 	return results
