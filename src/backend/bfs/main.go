@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+type SearchResult struct {
+	Recipes      [][]model.Recipe `json:"recipes"`
+	ElapsedTime  int64            `json:"elapsedTime"`  // dalam ms
+	VisitedNodes int              `json:"visitedNodes"` // jumlah node yang dikunjungi
+}
+
 const DATA_DIRECTORY_PATH = "../shared/data"
 const IMAGE_DIRECTORY_SERVE_PATH = "/images/"
 
@@ -122,9 +128,9 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var res *algorithm.BFSResult
 	if req.Mode == "multiple" {
-		res = algorithm.MultiBFS(db, req.Target, req.MaxRecipes, nil)
+		res = algorithm.Driver(db, req.Target, req.MaxRecipes, nil)
 	} else {
-		res = algorithm.MultiBFS(db, req.Target, 1, nil) // single = 1 recipe
+		res = algorithm.Driver(db, req.Target, 1, nil) // single = 1 recipe
 	}
 	elapsed := time.Since(start)
 

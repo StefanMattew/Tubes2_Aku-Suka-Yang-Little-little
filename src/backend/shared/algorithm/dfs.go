@@ -1,145 +1,14 @@
-// package algorithm
-
-// import (
-// 	"fmt"
-// 	"shared/model"
-// 	"shared/utility"
-// )
-
-// type DFSResult struct {
-// 	TargetElement string           `json:"target_element"`
-// 	Paths         [][]model.Recipe `json:"recipes"`
-// 	VisitedNodes  int              `json:"visited_nodes"`
-// }
-
-// type DFSNode struct {
-// 	Element    string         `json:"element"`
-// 	Path       []model.Recipe `json:"path"`
-// 	ParentNode *DFSNode
-// }
-
-// func DFS(db *model.ElementsDatabase, startElements []string, targetElement string, maxPath int, result chan<- *DFSResult, step chan<- *SearchProgress) {
-// 	target, exists := db.Elements[targetElement]
-// 	if !exists {
-// 		result <- &DFSResult{
-// 			TargetElement: targetElement,
-// 			Paths:         [][]model.Recipe{},
-// 			VisitedNodes:  0,
-// 		}
-// 		close(result)
-// 		return
-// 	}
-// 	if target.IsBasic {
-// 		result <- &DFSResult{
-// 			TargetElement: targetElement,
-// 			Paths:         [][]model.Recipe{},
-// 			VisitedNodes:  1,
-// 		}
-// 		close(result)
-// 		return
-// 	}
-
-// 	visitedCombinations := make(map[string]bool)
-// 	paths := make([][]model.Recipe, 0)
-// 	visitedCount := 0
-
-// 	var dfsRecursive func(current string, path []model.Recipe, depth int)
-// 	dfsRecursive = func(current string, path []model.Recipe, depth int) {
-// 		if len(paths) >= maxPath {
-// 			return // Hentikan jika sudah menemukan cukup banyak jalur.
-// 		}
-
-// 		visitedCount++
-// 		if step != nil {
-// 			step <- &SearchProgress{
-// 				CurrentElement: current,
-// 				Visited:        visitedCount,
-// 				PathsFound:     len(paths),
-// 				VisitedNodes:   visitedCombinations,
-// 			}
-// 		}
-
-// 		if current == targetElement {
-// 			newPath := make([]model.Recipe, len(path))
-// 			copy(newPath, path)
-// 			paths = append(paths, newPath)
-// 			return
-// 		}
-
-// 		for elementID := range db.Elements {
-// 			//Cek kombinasi current dengan element lain.
-// 			e1, e2 := current, elementID
-// 			if e1 > e2 {
-// 				e1, e2 = e2, e1
-// 			}
-// 			combinationKey := fmt.Sprintf("%s+%s", e1, e2)
-
-// 			if visitedCombinations[combinationKey] {
-// 				continue
-// 			}
-
-// 			visitedCombinations[combinationKey] = true
-
-// 			for resultElementID, resultElement := range db.Elements {
-// 				resultTier := utility.ParseTier(resultElement.Tier)
-// 				for _, recipe := range resultElement.Recipes {
-// 					if (recipe.Element1 == e1 && recipe.Element2 == e2) || (recipe.Element1 == e2 && recipe.Element2 == e1) {
-// 						r1, ok1 := db.Elements[recipe.Element1]
-// 						r2, ok2 := db.Elements[recipe.Element2]
-// 						if !ok1 || !ok2 {
-// 							continue
-// 						}
-// 						t1 := utility.ParseTier(r1.Tier)
-// 						t2 := utility.ParseTier(r2.Tier)
-// 						if t1 >= resultTier || t2 >= resultTier {
-// 							continue
-// 						}
-// 						newPath := make([]model.Recipe, len(path)+1)
-// 						copy(newPath, path)
-// 						newPath[len(path)] = recipe
-// 						dfsRecursive(resultElementID, newPath, depth+1)
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	for _, basicElement := range startElements {
-// 		dfsRecursive(basicElement, []model.Recipe{}, 0)
-// 	}
-
-// 	for i := range paths {
-// 		paths[i] = expandPath(paths[i], db, startElements)
-// 	}
-
-// 	result <- &DFSResult{
-// 		TargetElement: targetElement,
-// 		Paths:         paths,
-// 		VisitedNodes:  visitedCount,
-// 	}
-// 	close(result)
-// }
-
-// // Multithreading DFS
-// func MultiDFS(db *model.ElementsDatabase, targetElement string, maxPath int, step chan<- *SearchProgress) *DFSResult {
-// 	sortedDb := utility.SortByTier(db)
-// 	result := make(chan *DFSResult, 1)
-// 	startElement := []string{"Air", "Water", "Fire", "Earth"}
-
-// 	go DFS(sortedDb, startElement, targetElement, maxPath, result, step)
-
-// 	results := <-result
-
-// 	return results
-// }
-
-// ======================== FIX ============================
 package algorithm
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"runtime"
 	"shared/model"
 	"shared/utility"
-	// "log" // Uncomment jika perlu logging
+	"sync"
+	"time"
 )
 
 type DFSResult struct {
@@ -148,98 +17,95 @@ type DFSResult struct {
 	VisitedNodes  int              `json:"visited_nodes"`
 }
 
-// DFSNode tidak secara eksplisit digunakan dalam implementasi rekursif DFS ini,
-// tapi path dan elemen saat ini dikelola melalui parameter fungsi.
-// type DFSNode struct {
-// 	Element    string         `json:"element"`
-// 	Path       []model.Recipe `json:"path"`
-// 	ParentNode *DFSNode
-// }
+// Bare DFS function for both single and multi-threaded
+func DFSWithOptions(db *model.ElementsDatabase, startElements []string, targetElement string,
+	bannedTargetRecipes []int, maxPaths int, result chan<- *DFSResult, progress chan<- *SearchProgress) {
 
-func DFS(db *model.ElementsDatabase, startElements []string, targetElement string, maxPath int, resultChan chan<- *DFSResult, step chan<- *SearchProgress) { // Ganti nama var result
+	resultSent := false
+	defer func() {
+		if !resultSent {
+			result <- &DFSResult{
+				TargetElement: targetElement,
+				Paths:         [][]model.Recipe{},
+				VisitedNodes:  0,
+			}
+		}
+		close(result)
+	}()
+
 	target, exists := db.Elements[targetElement]
-	if !exists {
-		resultChan <- &DFSResult{ // Menggunakan resultChan
+	if !exists || target.IsBasic {
+		result <- &DFSResult{
 			TargetElement: targetElement,
 			Paths:         [][]model.Recipe{},
 			VisitedNodes:  0,
 		}
-		close(resultChan) // Menggunakan resultChan
+		resultSent = true
 		return
 	}
-	if target.IsBasic {
-		resultChan <- &DFSResult{ // Menggunakan resultChan
-			TargetElement: targetElement,
-			Paths:         [][]model.Recipe{},
-			VisitedNodes:  1,
+
+	visitedCombinations := make(map[string]bool)
+
+	// Add banned recipes to visitedCombinations with result
+	for _, bannedIdx := range bannedTargetRecipes {
+		if bannedIdx < len(target.Recipes) {
+			recipe := target.Recipes[bannedIdx]
+			e1, e2 := recipe.Element1, recipe.Element2
+			if e1 > e2 {
+				e1, e2 = e2, e1
+			}
+			// Include target element as result
+			bannedKey := fmt.Sprintf("%s+%s->%s", e1, e2, targetElement)
+			visitedCombinations[bannedKey] = true
+			log.Printf("Banned combination: %s", bannedKey)
 		}
-		close(resultChan) // Menggunakan resultChan
-		return
 	}
 
-	// Untuk DFS, visitedCombinations lebih cocok untuk melacak *kombinasi bahan* yang sudah dieksplorasi
-	// dalam satu cabang pencarian untuk mencegah loop tak terbatas dari kombinasi yang sama.
-	// Untuk melacak node yang dikunjungi secara global bisa berbeda, tergantung strategi.
-	// visitedPathElements digunakan untuk mencegah siklus dalam path saat ini.
+	paths := [][]model.Recipe{}
+	visitedCount := 0
 
-	paths := make([][]model.Recipe, 0)
-	visitedCount := 0 // Jumlah total pemanggilan rekursif atau node yang dieksplorasi
+	// DFS recursive function
+	var dfsSearch func(current string, currentPath []model.Recipe, availableElements map[string]bool)
+	dfsSearch = func(current string, currentPath []model.Recipe, availableElements map[string]bool) {
+		log.Printf("DFS: Exploring %s, path length: %d", current, len(currentPath))
 
-	var dfsRecursive func(current string, currentPath []model.Recipe, visitedPathElements map[string]bool)
-	dfsRecursive = func(current string, currentPath []model.Recipe, visitedPathElements map[string]bool) {
-		if maxPath > 0 && len(paths) >= maxPath {
+		if maxPaths > 0 && len(paths) >= maxPaths {
 			return
 		}
 
 		visitedCount++
-		if step != nil {
-			// Untuk DFS, 'visitedNodes' di SearchProgress mungkin lebih baik merefleksikan
-			// elemen unik dalam path saat ini atau kedalaman, bukan semua kombinasi global.
-			// Ini perlu disesuaikan dengan apa yang ingin ditampilkan di frontend.
-			tempVisitedForStep := make(map[string]bool)
-			for k, v := range visitedPathElements {
-				tempVisitedForStep[k] = v
-			}
-			step <- &SearchProgress{
+
+		if progress != nil {
+			select {
+			case progress <- &SearchProgress{
 				CurrentElement: current,
-				Visited:        visitedCount, // Atau kedalaman: len(currentPath)
+				Visited:        visitedCount,
 				PathsFound:     len(paths),
-				VisitedNodes:   tempVisitedForStep,
+				VisitedNodes:   availableElements,
+			}:
+			default:
 			}
 		}
 
-		// Tandai elemen saat ini sebagai dikunjungi dalam path ini
-		newVisitedPathElements := make(map[string]bool)
-		for k, v := range visitedPathElements {
-			newVisitedPathElements[k] = v
-		}
-		newVisitedPathElements[current] = true
-
+		// Found target
 		if current == targetElement {
-			// Path ditemukan, salin dan simpan
-			// currentPath sudah berisi Recipe dengan Result yang terisi
-			pathToAppend := make([]model.Recipe, len(currentPath))
-			copy(pathToAppend, currentPath)
-			paths = append(paths, pathToAppend)
+			pathCopy := make([]model.Recipe, len(currentPath))
+			copy(pathCopy, currentPath)
+			paths = append(paths, pathCopy)
+			log.Printf("Found path to %s with %d steps", targetElement, len(pathCopy))
 			return
 		}
 
-		// Coba kombinasikan 'current' dengan semua elemen lain yang ada di DB
-		// (atau elemen yang sudah ditemukan/dasar, tergantung strategi)
-		// Untuk DFS yang mencari resep, kita biasanya mencoba mengkombinasikan elemen saat ini
-		// dengan elemen dasar atau elemen lain yang sudah bisa dibuat.
-
-		// Iterasi melalui semua elemen di database sebagai otherElement
-		// Ini mungkin sangat tidak efisien untuk DFS. Strategi yang lebih baik adalah
-		// mencoba mengkombinasikan 'current' dengan elemen dasar atau elemen yang sudah ada di 'available'
-		// Namun, mengikuti struktur kode awal:
-		elementsToCombineWith := make([]string, 0, len(db.Elements))
-		for elName := range db.Elements {
-			elementsToCombineWith = append(elementsToCombineWith, elName)
+		// Track available elements for this branch
+		newAvailable := make(map[string]bool)
+		for k, v := range availableElements {
+			newAvailable[k] = v
 		}
+		newAvailable[current] = true
 
-		for _, otherElement := range elementsToCombineWith {
-			if maxPath > 0 && len(paths) >= maxPath {
+		// Try combinations with all available elements
+		for otherElement := range newAvailable {
+			if maxPaths > 0 && len(paths) >= maxPaths {
 				return
 			}
 
@@ -247,99 +113,411 @@ func DFS(db *model.ElementsDatabase, startElements []string, targetElement strin
 			if e1 > e2 {
 				e1, e2 = e2, e1
 			}
-			// combinationKey := fmt.Sprintf("%s+%s", e1, e2)
-			// visitedCombinations (global map) bisa digunakan di sini jika ingin mencegah
-			// eksplorasi ulang kombinasi bahan secara global, tapi hati-hati dengan DFS.
 
-			// Iterasi melalui semua kemungkinan hasil di database
-			for resultElementID, resultElementData := range db.Elements {
-				if resultElementData.IsBasic {
-					continue
-				} // Hasil tidak mungkin elemen dasar
-				if newVisitedPathElements[resultElementID] { // Jika hasil sudah ada di path saat ini, lewati untuk mencegah siklus langsung
+			// Check all possible results for this combination
+			for resultElementName, resultElement := range db.Elements {
+				if resultElement.IsBasic {
 					continue
 				}
 
-				resultTier := utility.ParseTier(resultElementData.Tier)
+				//Skip if already available (removed this check per your requirements)
+				if newAvailable[resultElementName] {
+					continue
+				}
 
-				for _, dbRecipe := range resultElementData.Recipes { // dbRecipe dari database
-					if (dbRecipe.Element1 == e1 && dbRecipe.Element2 == e2) || (dbRecipe.Element1 == e2 && dbRecipe.Element2 == e1) {
-						// Validasi Tier
-						r1Data, ok1 := db.Elements[dbRecipe.Element1]
-						r2Data, ok2 := db.Elements[dbRecipe.Element2]
-						if !ok1 || !ok2 {
+				combinationKey := fmt.Sprintf("%s+%s->%s", e1, e2, resultElementName)
+				if visitedCombinations[combinationKey] {
+					continue
+				}
+
+				// Check recipes
+				for _, recipe := range resultElement.Recipes {
+					if (recipe.Element1 == e1 && recipe.Element2 == e2) ||
+						(recipe.Element1 == e2 && recipe.Element2 == e1) {
+
+						if !isValidTierProgression(recipe, resultElement, db) {
 							continue
 						}
 
-						t1 := utility.ParseTier(r1Data.Tier)
-						t2 := utility.ParseTier(r2Data.Tier)
+						// Mark combination as visited for this search
+						visitedCombinations[combinationKey] = true
 
-						// Logika tier yang sama seperti di BFS
-						if t1 >= resultTier && !isSpecialCombination(dbRecipe.Element1, resultTier, db) {
-							continue
-						}
-						if t2 >= resultTier && !isSpecialCombination(dbRecipe.Element2, resultTier, db) {
-							continue
-						}
-
-						// Buat langkah resep dengan Result
-						stepRecipe := model.Recipe{
-							Element1: dbRecipe.Element1,
-							Element2: dbRecipe.Element2,
-							Result:   resultElementID,
+						// Create recipe with result
+						recipeWithResult := model.Recipe{
+							Element1: recipe.Element1,
+							Element2: recipe.Element2,
+							Result:   resultElementName,
 						}
 
-						newCurrentPath := make([]model.Recipe, len(currentPath)+1)
-						copy(newCurrentPath, currentPath)
-						newCurrentPath[len(currentPath)] = stepRecipe
+						newPath := make([]model.Recipe, len(currentPath)+1)
+						copy(newPath, currentPath)
+						newPath[len(currentPath)] = recipeWithResult
 
-						dfsRecursive(resultElementID, newCurrentPath, newVisitedPathElements)
-						if maxPath > 0 && len(paths) >= maxPath {
-							return
+						// Continue DFS
+						dfsSearch(resultElementName, newPath, newAvailable)
+
+						// Unmark to allow other paths
+						if maxPaths > 1 {
+							delete(visitedCombinations, combinationKey)
 						}
+
+						break // Only use first valid recipe
 					}
 				}
 			}
 		}
 	}
 
-	// Mulai DFS dari setiap elemen dasar
-	for _, basicElement := range startElements {
-		dfsRecursive(basicElement, []model.Recipe{}, make(map[string]bool))
-		if maxPath > 0 && len(paths) >= maxPath {
+	// Start DFS from each start element
+	for _, startElement := range startElements {
+		if maxPaths > 0 && len(paths) >= maxPaths {
 			break
 		}
+
+		availableElements := make(map[string]bool)
+		for _, elem := range startElements {
+			availableElements[elem] = true
+		}
+
+		log.Printf("Starting DFS from %s", startElement)
+		dfsSearch(startElement, []model.Recipe{}, availableElements)
 	}
 
+	log.Printf("DFS complete. Found %d paths", len(paths))
+
+	// Apply iterative expansion to all paths
 	expandedPaths := [][]model.Recipe{}
-	for _, p := range paths {
-		// Pastikan fungsi expandPath dan dependensinya (addDependencies, isBasicElement, dll.)
-		// tersedia untuk paket ini, atau pindahkan ke utility jika digunakan bersama.
-		// Mengasumsikan expandPath dapat diakses (misalnya, dari paket yang sama atau utilitas).
-		// Fungsi expandPath yang ada di bfs.go akan digunakan.
-		expandedPaths = append(expandedPaths, expandPath(p, db, startElements))
+	for i, path := range paths {
+		log.Printf("Expanding path %d", i+1)
+		expanded := iterativeExpansion_DFS(path, db, startElements, progress)
+		expandedPaths = append(expandedPaths, expanded)
 	}
 
-	resultChan <- &DFSResult{ // Menggunakan resultChan
+	result <- &DFSResult{
 		TargetElement: targetElement,
 		Paths:         expandedPaths,
 		VisitedNodes:  visitedCount,
 	}
-	close(resultChan) // Menggunakan resultChan
+	resultSent = true
 }
 
-func MultiDFS(db *model.ElementsDatabase, targetElement string, maxPath int, step chan<- *SearchProgress) *DFSResult {
-	// utility.SortByTier(db) // Mungkin tidak diperlukan
-	resultChan := make(chan *DFSResult, 1) // Menggunakan resultChan
-	startElement := []string{"Air", "Water", "Fire", "Earth"}
+// Single path DFS
+func DFSSingle(db *model.ElementsDatabase, startElements []string, targetElement string,
+	result chan<- *DFSResult, progress chan<- *SearchProgress) {
+	DFSWithOptions(db, startElements, targetElement, []int{}, 1, result, progress)
+}
 
-	go DFS(db, startElement, targetElement, maxPath, resultChan, step) // Menggunakan resultChan
+// Multiple threaded DFS
+func DFSMultipleThreaded(db *model.ElementsDatabase, startElements []string,
+	targetElement string, maxPaths int, timeoutSeconds int,
+	result chan<- *DFSResult) {
 
-	results := <-resultChan // Menggunakan resultChan
+	numWorkers := runtime.NumCPU()
+	pathsChan := make(chan []model.Recipe, maxPaths*2)
+	tasks := make(chan DFSTask, 100)
+	done := make(chan bool, 1)
+	var mu sync.Mutex
+	collectedPaths := make([][]model.Recipe, 0, maxPaths)
+	totalVisited := 0
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
 
+	// Path collector
+	go func() {
+		for {
+			select {
+			case path, ok := <-pathsChan:
+				if !ok {
+					done <- true
+					return
+				}
+				mu.Lock()
+				if len(collectedPaths) < maxPaths && !isDuplicatePath(path, collectedPaths) {
+					collectedPaths = append(collectedPaths, path)
+					log.Printf("DFS: Found path %d/%d with %d steps", len(collectedPaths), maxPaths, len(path))
+				}
+				mu.Unlock()
+
+			case <-ctx.Done():
+				done <- true
+				return
+			}
+		}
+	}()
+
+	// Worker pool
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			progressChan := make(chan *SearchProgress, 100)
+			go func() {
+				for range progressChan {
+				}
+			}()
+
+			for {
+				select {
+				case task, ok := <-tasks:
+					if !ok {
+						close(progressChan)
+						return
+					}
+
+					mu.Lock()
+					shouldStop := len(collectedPaths) >= maxPaths
+					mu.Unlock()
+
+					if shouldStop {
+						continue
+					}
+
+					log.Printf("DFS Worker %d: Processing task", workerID)
+
+					searchCtx, searchCancel := context.WithTimeout(ctx, 30*time.Second)
+					resultChan := make(chan *DFSResult, 1)
+
+					go DFSWithOptions(db, task.Shuffle, targetElement, task.BannedRecipes,
+						1, resultChan, progressChan)
+
+					select {
+					case dfsResult := <-resultChan:
+						searchCancel()
+
+						mu.Lock()
+						totalVisited += dfsResult.VisitedNodes
+						mu.Unlock()
+
+						if len(dfsResult.Paths) > 0 {
+							select {
+							case pathsChan <- dfsResult.Paths[0]:
+							case <-ctx.Done():
+								return
+							}
+						}
+
+					case <-searchCtx.Done():
+						searchCancel()
+						log.Printf("DFS Worker %d: Search timeout", workerID)
+
+					case <-ctx.Done():
+						searchCancel()
+						close(progressChan)
+						return
+					}
+
+				case <-ctx.Done():
+					close(progressChan)
+					return
+				}
+			}
+		}(i)
+	}
+
+	// Task generator
+	go func() {
+		defer close(tasks)
+
+		shuffles := generateFixedShuffles(startElements)
+
+		targetElem, exists := db.Elements[targetElement]
+		targetRecipeCount := 0
+		if exists {
+			targetRecipeCount = len(targetElem.Recipes)
+		}
+
+		// Try each shuffle
+		for i, shuffle := range shuffles {
+			mu.Lock()
+			currentCount := len(collectedPaths)
+			mu.Unlock()
+
+			if currentCount >= maxPaths {
+				break
+			}
+
+			task := DFSTask{
+				Shuffle:       shuffle,
+				BannedRecipes: []int{},
+			}
+
+			log.Printf("DFS: Queuing shuffle task %d", i)
+
+			select {
+			case tasks <- task:
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+
+		// Recipe banning phase
+		bannedRecipes := []int{}
+		for recipeIdx := 0; recipeIdx < targetRecipeCount; recipeIdx++ {
+			mu.Lock()
+			currentCount := len(collectedPaths)
+			mu.Unlock()
+
+			if currentCount >= maxPaths {
+				break
+			}
+
+			bannedRecipes = append(bannedRecipes, recipeIdx)
+			log.Printf("DFS: Banning recipe %d", recipeIdx)
+
+			task := DFSTask{
+				Shuffle:       startElements,
+				BannedRecipes: append([]int{}, bannedRecipes...),
+			}
+
+			select {
+			case tasks <- task:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(pathsChan)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
+
+	mu.Lock()
+	finalPaths := make([][]model.Recipe, len(collectedPaths))
+	copy(finalPaths, collectedPaths)
+	finalVisited := totalVisited
+	mu.Unlock()
+
+	result <- &DFSResult{
+		TargetElement: targetElement,
+		Paths:         finalPaths,
+		VisitedNodes:  finalVisited,
+	}
+	close(result)
+}
+
+type DFSTask struct {
+	Shuffle       []string
+	BannedRecipes []int
+}
+
+// DFS Driver
+func DFSDriver(db *model.ElementsDatabase, targetElement string, maxPaths int, step chan<- *SearchProgress) *DFSResult {
+	sortedDb := utility.SortByTier(db)
+	result := make(chan *DFSResult, 1)
+	startElements := []string{"Air", "Water", "Fire", "Earth"}
+
+	log.Printf("DFS Driver: Starting search for %s with maxPaths=%d", targetElement, maxPaths)
+
+	if maxPaths == 1 {
+		go DFSSingle(sortedDb, startElements, targetElement, result, step)
+	} else if maxPaths > 1 {
+		go DFSMultipleThreaded(sortedDb, startElements, targetElement, maxPaths, 30, result)
+	} else {
+		result <- &DFSResult{
+			TargetElement: targetElement,
+			Paths:         [][]model.Recipe{},
+			VisitedNodes:  0,
+		}
+		close(result)
+		return &DFSResult{
+			TargetElement: targetElement,
+			Paths:         [][]model.Recipe{},
+			VisitedNodes:  0,
+		}
+	}
+
+	results := <-result
 	return results
 }
 
-// Fungsi isSpecialCombination dan canCombineWithSelf (jika diperlukan untuk DFS dengan cara yang sama)
-// dapat disalin dari bfs.go atau dipindahkan ke paket utility jika digunakan bersama.
-// Untuk saat ini, saya asumsikan fungsi isSpecialCombination dari bfs.go dapat diakses jika berada dalam paket yang sama.
+// Iteratively run DFS to search for a path to a missing element.
+func iterativeExpansion_DFS(path []model.Recipe, db *model.ElementsDatabase, startElements []string, step chan<- *SearchProgress) []model.Recipe {
+	workingPath := make([]model.Recipe, len(path))
+	copy(workingPath, path)
+
+	// Make a createdElements list to track which elements have been created
+	createdElements := make(map[string]bool)
+	for _, elem := range startElements {
+		createdElements[elem] = true
+	}
+
+	iteration := 0
+	// Find a single missing element in the path from bottom up
+	for {
+		iteration++
+		log.Printf("Expansion iteration %d", iteration)
+		missingElement := ""
+		missingPosition := -1
+
+		for i, recipe := range workingPath {
+			if !createdElements[recipe.Element1] {
+				missingElement = recipe.Element1
+				missingPosition = i
+				log.Printf("Found missing element %s at position %d", missingElement, i)
+				break
+			}
+
+			if !createdElements[recipe.Element2] {
+				missingElement = recipe.Element2
+				missingPosition = i
+				log.Printf("Found missing element %s at position %d", missingElement, i)
+				break
+			}
+
+			// Add the element to the createdElements list using the Result from Recipe
+			if recipe.Result != "" {
+				createdElements[recipe.Result] = true
+			}
+		}
+
+		// Loop breaking
+		if missingElement == "" {
+			log.Printf("No missing elements found, expansion complete")
+			break
+		}
+
+		log.Printf("Searching for missing element: %s", missingElement)
+		subResult := make(chan *DFSResult, 1)
+		availableElements := keysFromMap(createdElements)
+
+		// Run DFS to find the path to the missing element
+		go DFSWithOptions(db, availableElements, missingElement, []int{}, 1, subResult, nil)
+
+		dfsResult := <-subResult
+		if len(dfsResult.Paths) == 0 {
+			log.Printf("Could not find path for %s, skipping", missingElement)
+			break
+		}
+
+		subPath := dfsResult.Paths[0]
+		log.Printf("Found path for %s with %d steps", missingElement, len(subPath))
+
+		newPath := []model.Recipe{}
+
+		// Insert the subPath in the correct position
+		for i, recipe := range workingPath {
+			if i == missingPosition {
+				newPath = append(newPath, subPath...)
+			}
+			newPath = append(newPath, recipe)
+		}
+
+		workingPath = newPath
+
+		// Iteration limit
+		if iteration > 50 {
+			log.Printf("Max iterations reached, stopping expansion")
+			break
+		}
+	}
+
+	return workingPath
+}

@@ -13,6 +13,7 @@ type Recipe struct {
 	Result   string `json:"result"`
 }
 
+
 type Element struct {
 	ID      string   `json:"id"`             // "Brick"
 	Name    string   `json:"name"`           // "Brick" (bisa beda jika ingin nama dengan kapitalisasi)
@@ -29,7 +30,6 @@ type SearchRequest struct {
 	Mode          string   `json:"mode"`      // single / multiple
 	MaxRecipes    int      `json:"maxRecipe"` // untuk multiple
 }
-
 type SearchResult struct {
 	Recipes      [][]Recipe `json:"recipes"`
 	ElapsedTime  int64      `json:"elapsedTime"`  // dalam ms
